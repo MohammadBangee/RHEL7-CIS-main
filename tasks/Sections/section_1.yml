@@ -1,0 +1,1112 @@
+---
+
+- name: "1.1.1.1 | PATCH | Ensure mounting of cramfs filesystems is disabled "
+  block:
+      - name: "1.1.1.1 | PATCH | Ensure mounting of cramfs filesystems is disabled | Edit modprobe config"
+        lineinfile:
+            dest: /etc/modprobe.d/CIS.conf
+            regexp: "^(#)?install cramfs(\\s|$)"
+            line: "install cramfs /bin/true"
+            create: true
+            mode: '0600'
+
+      - name: "1.1.1.1 | PATCH | Remove cramfs module"
+        modprobe:
+            name: cramfs
+            state: absent
+  when:
+      - rhel7cis_rule_1_1_1_1
+      - ansible_connection != 'docker'
+  tags:
+      - level1-server
+      - level1-workstation
+      - patch
+      - rule_1.1.1.1
+      - cramfs
+
+- name: "1.1.1.2 | PATCH | Ensure mounting of squashfs filesystems is disabled"
+  block:
+      - name: "1.1.1.2 | PATCH | Ensure mounting of squashfs filesystems is disabled | Edit modprobe config "
+        lineinfile:
+            dest: /etc/modprobe.d/CIS.conf
+            regexp: "^(#)?install squashfs(\\s|$)"
+            line: "install squashfs /bin/true"
+            create: true
+            mode: '0600'
+
+      - name: "1.1.1.2 | PATCH | Remove squashfs module | rmmod"
+        modprobe:
+            name: squashfs
+            state: absent
+  when:
+      - rhel7cis_rule_1_1_1_2
+      - ansible_connection != 'docker'
+  tags:
+      - level2-server
+      - level2-workstation
+      - patch
+      - rule_1.1.1.2
+      - squashfs
+
+- name: "1.1.1.3 | PATCH | Ensure mounting of udf filesystems is disabled"
+  block:
+      - name: "1.1.1.3 | PATCH | Ensure mounting of udf filesystems is disabled | Edit modprobe config"
+        lineinfile:
+            dest: /etc/modprobe.d/CIS.conf
+            regexp: "^(#)?install udf(\\s|$)"
+            line: "install udf /bin/true"
+            create: true
+            mode: '0600'
+
+      - name: "1.1.1.3 | PATCH | Remove udf module | rmmod "
+        modprobe:
+            name: udf
+            state: absent
+  when:
+      - rhel7cis_rule_1_1_1_3
+      - ansible_connection != 'docker'
+  tags:
+      - level1-server
+      - level1-workstation
+      - patch
+      - rule_1.1.1.3
+      - udf
+
+---
+
+- name: "1.1.2 | AUDIT | Ensure /tmp is configured"
+  block:
+      - name: "1.1.2 | AUDIT | Ensure /tmp is configured | Absent"
+        debug:
+            msg: "WARNING!! {{ required_mount }} doesn't exist. This is a manual task"
+        register: tmp_mount_absent
+        changed_when: tmp_mount_absent.skipped is undefined
+        when:
+            - required_mount not in mount_names
+
+      - name: "1.1.2 | AUDIT | Ensure /tmp is configured | Present"
+        debug:
+            msg: "Congratulations: {{ required_mount }} exists."
+        register: tmp_mount_present
+        when:
+            - required_mount in mount_names
+  vars:
+      required_mount: '/tmp'
+  when:
+      - rhel7cis_rule_1_1_2
+  tags:
+      - level1-server
+      - level1-workstation
+      - audit
+      - mounts
+      - rule_1.1.2
+
+- name: |
+        "1.1.3 | PATCH | Ensure nodev option set on /tmp partition | skips if not present"
+        "1.1.4 | PATCH | Ensure nosuid option set on /tmp partition | skips if not present"
+        "1.1.5 | PATCH | Ensure noexec option set on /tmp partition| skips if not present"
+  block:
+      - name: |
+              "1.1.3 | PATCH | Ensure nodev option set on /tmp partition | fstab config | skips if mount absent"
+              "1.1.4 | PATCH | Ensure nosuid option set on /tmp partition | fstab_config | skips if mount absent"
+              "1.1.5 | PATCH | Ensure noexec option set on /tmp partition| fstab_config | skips if mount absent"
+        mount:
+            name: /tmp
+            src: "{{ item.device }}"
+            fstype: "{{ item.fstype }}"
+            state: present
+            opts: defaults,{% if rhel7cis_rule_1_1_3 %}noexec,{% endif %}{% if rhel7cis_rule_1_1_4 %}nodev,{% endif %}{% if rhel7cis_rule_1_1_5 %}nosuid{% endif %}
+        notify: remount tmp
+        loop: "{{ ansible_mounts }}"
+        loop_control:
+            label: "{{ item.mount }}"
+        when:
+            - not rhel7cis_tmp_svc
+            - item.mount == "/tmp"
+
+      - name: |
+              "1.1.3 | PATCH | Ensure noexec option set on /tmp partition | systemd | skips if mount absent"
+              "1.1.4 | PATCH | Ensure nodev option set on /tmp partition | systemd | skips if mount absent"
+              "1.1.5 | PATCH | Ensure nosuid option set on /tmp partition | systemd | skips if mount absent"
+        template:
+            src: etc/tmp_mount.j2
+            dest: /etc/systemd/system/tmp.mount
+            owner: root
+            group: root
+            mode: 0644
+        notify: systemd restart tmp.mount
+        when:
+            - rhel7cis_tmp_svc
+  when:
+      - tmp_mount_present is defined
+      - rhel7cis_rule_1_1_2  # This is required so the check takes place
+      - rhel7cis_rule_1_1_3 or
+        rhel7cis_rule_1_1_4 or
+        rhel7cis_rule_1_1_5
+  tags:
+      - level1-server
+      - level1-workstation
+      - patch
+      - rule_1.1.3
+      - rule_1.1.4
+      - rule_1.1.5
+
+- name: "1.1.6 | AUDIT | Ensure /dev/shm is configured"
+  block:
+      - name: "1.1.6 | AUDIT | Ensure separate partition exists for {{ required_mount }} | Absent"
+        debug:
+            msg: "WARNING!! {{ required_mount }} doesn't exist. This is a manual task"
+        register: dev_shm_mount_absent
+        changed_when: dev_shm_mount_absent.skipped is undefined
+        when:
+            - required_mount not in mount_names
+      - name: "1.1.6 | AUDIT | Ensure separate partition exists for {{ required_mount }} | Present"
+        debug:
+            msg: "Congratulations: {{ required_mount }} exists."
+        register: dev_shm_mount_present
+        when:
+            - required_mount in mount_names
+  vars:
+      required_mount: '/dev/shm'
+  when:
+      - rhel7cis_rule_1_1_6
+  tags:
+      - level1-server
+      - level1-workstation
+      - patch
+      - mounts
+      - rule_1.1.6
+
+- name: |
+         "1.1.7 | PATCH | Ensure noexec option set on /dev/shm partition | skips if mount absent"
+         "1.1.8 | PATCH | Ensure nosuid option set on /dev/shm partition | skips if mount absent"
+         "1.1.9 | PATCH | Ensure noexec option set on /dev/shm partition | skips if mount absent"
+  mount:
+      name: /dev/shm
+      src: tmpfs
+      fstype: tmpfs
+      state: present
+      opts: defaults,{% if rhel7cis_rule_1_1_7 %}noexec,{% endif %}{% if rhel7cis_rule_1_1_8 %}nodev,{% endif %}{% if rhel7cis_rule_1_1_9 %}nosuid{% endif %},seclabel
+  notify: remount dev_shm
+  when:
+      - rhel7cis_rule_1_1_7 or
+        rhel7cis_rule_1_1_8 or
+        rhel7cis_rule_1_1_9
+  tags:
+      - level1-server
+      - level1-workstation
+      - patch
+      - mounts
+      - rule_1.1.7
+      - rule_1.1.8
+      - rule_1.1.9
+
+- name: "1.1.10 | AUDIT | Ensure separate partition exists for {{ required_mount }} | skips if mount absent"
+  block:
+      - name: "1.1.10 | AUDIT | Ensure separate partition exists for {{ required_mount }} | Absent"
+        debug:
+            msg: "WARNING!! {{ required_mount }} doesn't exist. This is a manual task"
+        register: var_mount_absent
+        changed_when: var_mount_absent.skipped is undefined
+        when:
+            - required_mount not in mount_names
+
+      - name: "1.1.10 | AUDIT | Ensure separate partition exists for {{ required_mount }} | Present"
+        debug:
+            msg: "Congratulations: {{ required_mount }} exists."
+        register: var_mount_present
+        when:
+            - required_mount in mount_names
+  vars:
+      required_mount: '/var'
+  when:
+      - rhel7cis_rule_1_1_10
+  tags:
+      - level2-server
+      - level2-workstation
+      - audit
+      - mounts
+      - rule_1.1.10
+
+- name: "1.1.11 | AUDIT | Ensure separate partition exists for {{ required_mount }} | skips if mount absent"
+  block:
+      - name: "1.1.11 | AUDIT | Ensure separate partition exists for {{ required_mount }} | Absent"
+        debug:
+            msg: "WARNING!! {{ required_mount }} doesn't exist. This is a manual task"
+        register: var_tmp_mount_absent
+        changed_when: var_tmp_mount_absent.skipped is undefined
+        when:
+            - required_mount not in mount_names
+
+      - name: "1.1.11 | AUDIT | Ensure separate partition exists for {{ required_mount }} | Present"
+        debug:
+            msg: "Congratulations: {{ required_mount }} exists."
+        register: var_tmp_mount_present
+        when:
+            - required_mount in mount_names
+  vars:
+      required_mount: '/var/tmp'
+  when:
+      - rhel7cis_rule_1_1_11
+  tags:
+      - level2-server
+      - level2-workstation
+      - audit
+      - mounts
+      - rule_1.1.11
+
+- name: |
+          "1.1.12 | PATCH | Ensure noexec option set on /var/tmp partition | skips if mount absent"
+          "1.1.13 | PATCH | Ensure nodec option set on /var/tmp partition | skips if mount absent"
+          "1.1.14 | PATCH | Ensure nosuid option set on /var/tmp partition | skips if mount absent"
+  mount:
+      name: /var/tmp
+      src: "{{ item.device }}"
+      fstype: "{{ item.fstype }}"
+      state: present
+      opts: defaults,{% if rhel7cis_rule_1_1_12 %}noexec,{% endif %}{% if rhel7cis_rule_1_1_13 %}nodev,{% endif %}{% if rhel7cis_rule_1_1_14 %}nosuid{% endif %}
+  loop: "{{ ansible_mounts }}"
+  loop_control:
+      label: "{{ item.mount }}"
+  when:
+      - var_tmp_mount_present is defined
+      - item.mount == "/var/tmp"
+      - rhel7cis_rule_1_1_11  # This is required so the check takes place
+      - rhel7cis_rule_1_1_12 or
+        rhel7cis_rule_1_1_13 or
+        rhel7cis_rule_1_1_14
+  tags:
+      - level1-server
+      - level1-workstation
+      - patch
+      - mounts
+      - skip_ansible_lint
+
+- name: "1.1.15 | AUDIT | Ensure separate partition exists for /var/log  | skips if mount absent"
+  block:
+      - name: "1.1.15 | AUDIT | Ensure separate partition exists for {{ required_mount }} | Absent"
+        debug:
+            msg: "WARNING!! {{ required_mount }} doesn't exist. This is a manual task"
+        register: var_log_mount_absent
+        changed_when: var_log_mount_absent.skipped is undefined
+        when:
+            - required_mount not in mount_names
+      - name: "1.1.15 | AUDIT | Ensure separate partition exists for {{ required_mount }} | Present"
+        debug:
+            msg: "Congratulations: {{ required_mount }} exists."
+        when:
+            - required_mount in mount_names
+  vars:
+      required_mount: '/var/log'
+  when:
+      - rhel7cis_rule_1_1_15
+  tags:
+      - level2-server
+      - level2-workstation
+      - audit
+      - mounts
+      - rule_1.1.15
+      - skip_ansible_lint
+
+- name: "1.1.16 | AUDIT | Ensure separate partition exists for /var/log/audit | skips if mount absent"
+  block:
+      - name: "1.1.16 | AUDIT | Ensure separate partition exists for {{ required_mount }} | Absent"
+        debug:
+            msg: "WARNING!! {{ required_mount }} doesn't exist. This is a manual task"
+        register: var_log_audit_mount_absent
+        changed_when: var_log_audit_mount_absent.skipped is undefined
+        when:
+            - required_mount not in mount_names
+
+      - name: "1.1.16 | AUDIT | Ensure separate partition exists for {{ required_mount }} | Present"
+        debug:
+            msg: "Congratulations: {{ required_mount }} exists."
+        when:
+            - required_mount in mount_names
+  vars:
+      required_mount: '/var/log/audit'
+  when:
+      - rhel7cis_rule_1_1_16
+  tags:
+      - level2-server
+      - level2-workstation
+      - audit
+      - mounts
+      - rule_1.1.16
+      - skip_ansible_lint
+
+- name: "1.1.17 | AUDIT | Ensure separate partition exists for /home"
+  block:
+      - name: "1.1.17 | AUDIT | Ensure separate partition exists for {{ required_mount }} | Absent"
+        debug:
+            msg: "WARNING!! {{ required_mount }} doesn't exist. This is a manual task"
+        register: home_mount_absent
+        changed_when: home_mount_absent.skipped is undefined
+        when:
+            - required_mount not in mount_names
+
+      - name: "1.1.17 | AUDIT | Ensure separate partition exists for {{ required_mount }} | Present"
+        debug:
+            msg: "Congratulations: {{ required_mount }} exists."
+        register: home_mount_present
+        when:
+            - required_mount in mount_names
+  vars:
+      required_mount: '/home'
+  when:
+      - rhel7cis_rule_1_1_17
+  tags:
+      - level2-server
+      - level2-workstation
+      - audit
+      - mounts
+      - rule_1.1.17
+      - skip_ansible_lint
+
+- name: "1.1.18 | PATCH | Ensure nodev option set on /home partition | skips if mount absent"
+  mount:
+      name: /home
+      src: "{{ item.device }}"
+      fstype: "{{ item.fstype }}"
+      state: present
+      opts: defaults,{% if rhel7cis_rule_1_1_17 %}nodev{% endif %}
+  loop: "{{ ansible_mounts }}"
+  loop_control:
+      label: "{{ item.mount }}"
+  when:
+      - home_mount_present is defined
+      - item.mount == "/home"
+      - rhel7cis_rule_1_1_18
+  tags:
+      - level1-server
+      - level1-workstation
+      - patch
+      - mounts
+      - rule_1.1.18
+      - skip_ansible_lint
+
+- name: |
+      "1.1.19 | PATCH | Ensure removable media partitions include noexec option"
+      "1.1.20 | PATCH | Ensure nodev option set on removable media partitions"
+      "1.1.21 | PATCH | Ensure nosuid option set on removable media partitions"
+  debug:
+      msg: "--> Not relevant"
+  changed_when: false
+  when:
+      - rhel7cis_rule_1_1_19 or
+        rhel7cis_rule_1_1_20 or
+        rhel7cis_rule_1_1_21
+  tags:
+      - level1-server
+      - level1-workstation
+      - audit
+      - mounts
+      - rule_1.1.19
+      - rule_1.1.20
+      - rule_1.1.21
+
+- name: "1.1.22 | PATCH | Ensure sticky bit is set on all world-writable directories"
+  shell: df --local -P | awk {'if (NR!=1) print $6'} | xargs -I '{}' find '{}' -xdev -type d -perm -0002 2>/dev/null | xargs chmod a+t
+  args:
+      warn: false
+  changed_when: false
+  failed_when: false
+  when:
+      - rhel7cis_rule_1_1_22
+  tags:
+      - skip_ansible_lint
+      - level1-server
+      - level1-workstation
+      - patch
+      - stickybits
+      - permissons
+      - rule_1.1.22
+
+- name: "1.1.23 | PATCH | Disable Automounting"
+  service:
+      name: autofs
+      enabled: false
+  when:
+      - not rhel7cis_allow_autofs
+      - "'autofs' in ansible_facts.packages"
+      - rhel7cis_rule_1_1_23
+  tags:
+      - level1-server
+      - level2-workstation
+      - patch
+      - mounts
+      - automounting
+      - rule_1.1.23
+
+- name: "1.1.24 | PATCH | Disable USB Storage"
+  block:
+      - name: "1.1.24 | PATCH | Disable USB Storage | Edit modprobe config"
+        lineinfile:
+            dest: /etc/modprobe.d/CIS.conf
+            regexp: "^(#)?install usb-storage(\\s|$)"
+            line: "install usb-storage /bin/true"
+            create: true
+            owner: root
+            group: root
+            mode: 0600
+
+      - name: "1.1.24 | PATCH | Disable USB Storage | Edit modprobe config"
+        modprobe:
+            name: usb-storage
+            state: absent
+  when:
+      - rhel7cis_rule_1_1_24
+  tags:
+      - level1-server
+      - level2-workstation
+      - patch
+      - mounts
+      - removable_storage
+      - rule_1.1.24
+
+---
+
+- name: "1.2.1 | PATCH | Ensure GPG keys are configured"
+  block:
+      - name: "1.2.1 | PATCH | Ensure GPG keys are configured"
+        shell: "PKG=`rpm -qf {{ rpm_gpg_key }}` && rpm -q --queryformat \"%{PACKAGER} %{SIGPGP:pgpsig}\\n\" \"${PKG}\" | grep \"^{{ rpm_packager }}.*Key.ID.{{ rpm_key }}\""
+        changed_when: false
+  when:
+      - rhel7cis_rule_1_2_1
+  tags:
+      - level1-server
+      - level1-workstation
+      - patch
+      - rule_1.2.1
+
+- name: "1.2.2 | AUDIT | Ensure package manager repositories are configured"
+  block:
+      - name: "1.2.2 | AUDIT | Ensure package manager repositories are configured"
+        shell: yum repolist
+        changed_when: false
+        register: repolist
+        check_mode: false
+        args:
+            warn: false
+        tags:
+            - skip_ansible_lint
+
+      - name: "1.2.2 | AUDIT | Ensure package manager repositories are configured"
+        debug:
+            msg:
+                - "Please check against site policy repos listed below match expected:"
+                - "{{ repolist.stdout_lines }}"
+  when:
+      - rhel7cis_rule_1_2_2
+  tags:
+      - level1-server
+      - level1-workstation
+      - audit
+      - rule_1.2.2
+      - skip_ansible_lint
+
+- name: "1.2.3 | PATCH | Ensure gpgcheck is globally activated"
+  block:
+      - name: "1.2.3 | AUDIT | Ensure gpgcheck is globally activated"
+        find:
+            paths: /etc/yum.repos.d
+            patterns: "*.repo"
+        changed_when: false
+        register: yum_repos
+
+      - name: "1.2.3 | PATCH | Ensure gpgcheck is globally activated"
+        replace:
+            path: "{{ item.path }}"
+            regexp: "^gpgcheck=0"
+            replace: "gpgcheck=1"
+        loop: "{{ yum_repos.files }}"
+        loop_control:
+            label: "{{ item.path }}"
+  when:
+      - rhel7cis_rule_1_2_3
+  tags:
+      - level1-server
+      - level1-workstation
+      - patch
+      - rule_1.2.3
+
+---
+
+- name: "1.3.1 | PATCH | Ensure AIDE is installed"
+  block:
+      - name: "1.3.1 | PATCH | Ensure AIDE is installed | Install"
+        package:
+            name: aide
+            state: installed
+
+      - name: "1.3.1 | PATCH | Ensure AIDE is installed | started"
+        shell: /usr/sbin/aide --init -B 'database_out=file:/var/lib/aide/aide.db.gz'
+        args:
+            creates: /var/lib/aide/aide.db.gz
+        changed_when: false
+        failed_when: false
+        async: "{{ ansible_check_mode | ternary(0, 45) }}"
+        poll: 0
+  when:
+      - rhel7cis_config_aide
+      - rhel7cis_rule_1_3_1
+  tags:
+      - level1-server
+      - level1-workstation
+      - aide
+      - patch
+      - rule_1.3.1
+  vars:
+      ansible_python_interpreter: /bin/python
+
+- name: "1.3.2 | PATCH | Ensure filesystem integrity is regularly checked | cron"
+  cron:
+      name: Run AIDE integrity check
+      minute: "{{ rhel7cis_aide_cron['aide_minute'] | default('0') }}"
+      hour: "{{ rhel7cis_aide_cron['aide_hour'] | default('5') }}"
+      day: "{{ rhel7cis_aide_cron['aide_day'] | default('*') }}"
+      month: "{{ rhel7cis_aide_cron['aide_month'] | default('*') }}"
+      weekday: "{{ rhel7cis_aide_cron['aide_weekday'] | default('*') }}"
+      job: "{{ rhel7cis_aide_cron['aide_job'] }}"
+  when:
+      - rhel7cis_rule_1_3_2
+  tags:
+      - level1-server
+      - level1-workstation
+      - aide
+      - file_integrity
+      - patch
+      - rule_1.3.2
+
+---
+
+- name: "1.4.1 | PATCH | Ensure bootloader password is set"
+  block:
+      - name: "1.4.1 | PATCH | Ensure bootloader password is set"
+        copy:
+            dest: "{{ rhel7cis_bootloader_path }}user.cfg"  # noqa template-instead-of-copy
+            content: "GRUB2_PASSWORD={{ rhel7cis_bootloader_password_hash }}"
+            owner: root
+            group: root
+            mode: "{% if rhel7cis_legacy_boot %}0600{% else %}0700{% endif %}"
+        register: bootloader_pw
+        notify: grub2cfg
+
+      - name: "1.4.1 | FACT | Ensure bootloader password is set"
+        set_fact:
+            change_requires_reboot: true
+        when: bootloader_pw
+  when:
+      - ansible_distribution_version >= '7.2'
+      - rhel7cis_set_boot_pass
+      - rhel7cis_rule_1_4_1
+  tags:
+      - level1-server
+      - level1-workstation
+      - grub
+      - patch
+      - rule_1.4.1
+
+- name: "1.4.2 | PATCH | Ensure permissions on bootloader config are configured"
+  block:
+      - name: "1.4.2 | PATCH | Ensure permissions on bootloader config are configured | Update grub config settings"
+        file:
+            path: "{{ rhel7cis_bootloader_path }}grub.cfg"
+            owner: root
+            group: root
+            mode: 0600
+        when:
+            - rhel7cis_legacy_boot
+
+      - name: "1.4.2 | PATCH | Ensure permissions on bootloader config are configured | UEFI"
+        mount:
+            name: /boot/efi
+            src: "UUID={{ item.uuid }}"
+            fstype: vfat
+            state: present
+            opts: defaults,umask=0027,fmask=0077,uid=0,gid=0
+            passno: '0'
+        loop: "{{ ansible_mounts }}"
+        loop_control:
+            label: "{{ item.mount }}"
+        when:
+            - not rhel7cis_legacy_boot
+            - item.mount == "/boot/efi"
+  when:
+      - rhel7cis_rule_1_4_2
+  tags:
+      - level1-server
+      - level1-workstation
+      - grub
+      - patch
+      - rule_1.4.2
+
+- name: "1.4.3 | PATCH | Ensure authentication required for single user mode"
+  block:
+      - name: "1.4.3 | PATCH | Ensure authentication required for single user mode | Emergency service"
+        lineinfile:
+            dest: /usr/lib/systemd/system/emergency.service
+            regexp: '/sbin/sulogin'
+            line: 'ExecStart=-/bin/sh -c "/sbin/sulogin; /usr/bin/systemctl --fail --no-block default"'
+
+      - name: "1.4.3 | PATCH | Ensure authentication required for single user mode | Rescue service"
+        lineinfile:
+            dest: /usr/lib/systemd/system/rescue.service
+            regexp: '/sbin/sulogin'
+            line: 'ExecStart=-/bin/sh -c "/sbin/sulogin; /usr/bin/systemctl --fail --no-block default"'
+  when:
+      - rhel7cis_rule_1_4_3
+  tags:
+      - level1-server
+      - level1-workstation
+      - patch
+      - rule_1.4.3
+
+---
+
+- name: "1.5.1 | PATCH | Ensure core dumps are restricted"
+  block:
+      - name: "1.5.1 | PATCH | Ensure core dumps are restricted | Update limits.conf file"
+        lineinfile:
+            state: present
+            dest: /etc/security/limits.conf
+            regexp: '^#?\\*.*core'
+            line: '*                hard    core            0'
+            insertbefore: '^# End of file'
+
+      - name: "1.5.1 | PATCH | Ensure core dumps are restricted | Set active kernel parameter"
+        sysctl:
+            name: fs.suid_dumpable
+            value: '0'
+            state: present
+            reload: true
+            sysctl_set: true
+            ignoreerrors: true
+
+      - name: 1.5.1 | PATCH | Ensure core dumps are restricted | coredump.conf"
+        lineinfile:
+            dest: /etc/systemd/coredump.conf
+            regexp: "{{ item.regex }}"
+            line: "{{ item.line }}"
+            create: true
+            mode: 0644
+        loop:
+            - { regex: '^Storage', line: 'Storage=none' }
+            - { regex: '^ProcessSizeMax', line: 'ProcessSizeMax=0' }
+  when:
+      - rhel7cis_rule_1_5_1
+  tags:
+      - level1-server
+      - level1-workstation
+      - sysctl
+      - patch
+      - rule_1.5.1
+
+- name: "1.5.2 | PATCH | Ensure XD/NX support is enabled"
+  shell: dmesg|grep -E "NX|XD" | grep " active"
+  changed_when: false
+  when:
+      - rhel7cis_rule_1_5_2
+  tags:
+      - skip_ansible_lint
+      - level1-server
+      - level1-workstation
+      - patch
+      - rule_1.5.2
+
+- name: "1.5.3 | PATCH | Ensure address space layout randomization (ASLR) is enabled"
+  sysctl:
+      name: kernel.randomize_va_space
+      value: '2'
+      state: present
+      reload: true
+      sysctl_set: true
+      ignoreerrors: true
+  when:
+      - rhel7cis_rule_1_5_3
+  tags:
+      - level1-server
+      - level1-workstation
+      - patch
+      - rule_1.5.3
+
+- name: "1.5.4 | PATCH | Ensure prelink is disabled"
+  package:
+      name: prelink
+      state: absent
+  when:
+      - rhel7cis_rule_1_5_4
+  tags:
+      - level1-server
+      - level1-workstation
+      - patch
+      - rule_1.5.4
+  vars:
+      ansible_python_interpreter: /bin/python
+
+---
+
+- name: "1.6.1.1 | PATCH | Ensure SELinux is installed"
+  package:
+      name: libselinux
+      state: present
+  when:
+      - not rhel7cis_selinux_disable
+      - rhel7cis_rule_1_6_1_1
+  tags:
+      - level1-server
+      - level1-workstation
+      - patch
+      - rule_1.6.1.1
+  vars:
+      ansible_python_interpreter: /bin/python
+
+- name: "1.6.1.2 | PATCH | Ensure SELinux is not disabled in bootloader configuration"
+  block:
+      - name: "1.6.1.2 | PATCH | Ensure SELinux is not disabled in bootloader configuration"
+        replace:
+            dest: /etc/default/grub
+            regexp: '(selinux|enforcing)\s*=\s*0\s*'
+        register: selinux_grub_patch
+        ignore_errors: true  # noqa ignore-errors
+        notify: grub2cfg
+
+      - name: "1.6.1.2 | FACT | Ensure SELinux is not disabled in bootloader configuration"
+        set_fact:
+            change_requires_reboot: true
+        when:
+            - selinux_grub_patch.changed
+  when:
+      - not rhel7cis_selinux_disable
+      - rhel7cis_rule_1_6_1_2
+  tags:
+      - level1-server
+      - level1-workstation
+      - patch
+      - rule_1.6.1.2
+
+- name: "1.6.1.3 | PATCH | Ensure SELinux policy is configured\n
+         1.6.1.4 | PATCH | Ensure the SELinux state is enforcing or permissive"
+  selinux:
+      conf: /etc/selinux/config
+      policy: "{{ rhel7cis_selinux_pol }}"
+      state: "{{ rhel7cis_selinux_state }}"
+  when:
+      - not rhel7cis_selinux_disable
+      - rhel7cis_rule_1_6_1_3
+      - rhel7cis_rule_1_6_1_4
+  tags:
+      - level1-server
+      - level1-workstation
+      - selinux
+      - patch
+      - rule_1.6.1.3
+      - rule_1.6.1.4
+
+- name: "1.6.1.5 | PATCH | Ensure the SELinux state is enforcing"
+  selinux:
+      conf: /etc/selinux/config
+      policy: "{{ rhel7cis_selinux_pol }}"
+      state: enforcing
+  when:
+      - not rhel7cis_selinux_disable
+      - not rhel7cis_selinux_state == "permissive"
+      - rhel7cis_rule_1_6_1_5
+  tags:
+      - level2-server
+      - level2-workstation
+      - selinux
+      - patch
+      - rule_1.6.1.5
+
+- name: "1.6.1.6 | AUDIT | Ensure no unconfined daemons exist"
+  block:
+      - name: "1.6.1.6 | AUDIT | Ensure no unconfined daemons exist | Find the unconfined daemons"
+        shell: ps -eZ | egrep "initrc" | egrep -vw "tr|ps|egrep|bash|awk" | tr ':' ' ' | awk '{ print $NF }'
+        failed_when: false
+        changed_when: false
+        check_mode: false
+        register: rhelcis_1_6_1_6_unconf_daemons
+
+      - name: "1.6.1.6 | AUDIT | Ensure no unconfined daemons exist | Message on no unconfined daemones"
+        debug:
+            msg: "Good News! There are no unconfined daemons found on your system"
+        when: rhelcis_1_6_1_6_unconf_daemons.stdout | length == 0
+
+      - name: "1.6.1.6 | AUDIT | Ensure no unconfined daemons exist | Message on unconfined daemones"
+        debug:
+            msg: "WARNING!! You have unconfined daemons: {{ rhelcis_1_6_1_6_unconf_daemons.stdout_lines }}"
+        when: rhelcis_1_6_1_6_unconf_daemons.stdout | length > 0
+  when:
+      - rhel7cis_rule_1_6_1_6
+  tags:
+      - level1-server
+      - level1-workstation
+      - audit
+      - rule_1.6.1.6
+
+- name: "1.6.1.7 | PATCH | Ensure SETroubleshoot is not installed"
+  package:
+      name: setroubleshoot
+      state: absent
+  when:
+      - rhel7cis_rule_1_6_1_7
+  tags:
+      - level1-server
+      - level1-workstation
+      - selinux
+      - patch
+      - rule_1.6.1.7
+  vars:
+      ansible_python_interpreter: /bin/python
+
+- name: "1.6.1.8 | PATCH | Ensure the MCS Translation Service (mcstrans) is not installed"
+  package:
+      name: mcstrans
+      state: absent
+  when:
+      - rhel7cis_rule_1_6_1_8
+  tags:
+      - level1-server
+      - level1-workstation
+      - patch
+      - rule_1.6.1.8
+  vars:
+      ansible_python_interpreter: /bin/python
+
+---
+
+- name: "1.7.1 | PATCH | Ensure message of the day is configured properly"
+  template:
+      src: etc/motd.j2
+      dest: /etc/motd
+      owner: root
+      group: root
+      mode: 0644
+  when:
+      - rhel7cis_rule_1_7_1
+  tags:
+      - level1-server
+      - level1-workstation
+      - banner
+      - patch
+      - rule_1.7.1
+
+- name: "1.7.2 | PATCH | Ensure local login warning banner is configured properly"
+  template:
+      src: etc/issue.j2
+      dest: /etc/issue
+      owner: root
+      group: root
+      mode: 0644
+  when:
+      - rhel7cis_rule_1_7_2
+  tags:
+      - level1-server
+      - level1-workstation
+      - banner
+      - patch
+      - rule_1.7.2
+
+- name: "1.7.3 | PATCH | Ensure remote login warning banner is configured properly"
+  template:
+      src: etc/issue.net.j2
+      dest: /etc/issue.net
+      owner: root
+      group: root
+      mode: 0644
+  when:
+      - rhel7cis_rule_1_7_3
+  tags:
+      - level1-server
+      - level1-workstation
+      - banner
+      - patch
+      - rule_1.7.3
+
+- name: "1.7.4 | PATCH | Ensure permissions on /etc/motd are configured"
+  file:
+      dest: /etc/motd
+      state: file
+      owner: root
+      group: root
+      mode: 0644
+  when:
+      - rhel7cis_rule_1_7_4
+  tags:
+      - level1-server
+      - level1-workstation
+      - perms
+      - patch
+      - rule_1.7.4
+
+- name: "1.7.5 | PATCH | Ensure permissions on /etc/issue are configured"
+  file:
+      dest: /etc/issue
+      state: file
+      owner: root
+      group: root
+      mode: 0644
+  when:
+      - rhel7cis_rule_1_7_5
+  tags:
+      - level1-server
+      - level1-workstation
+      - perms
+      - patch
+      - rule_1.7.5
+
+- name: "1.7.6 | PATCH | Ensure permissions on /etc/issue.net are configured"
+  file:
+      dest: /etc/issue.net
+      state: file
+      owner: root
+      group: root
+      mode: 0644
+  when:
+      - rhel7cis_rule_1_7_6
+  tags:
+      - level1-server
+      - level1-workstation
+      - perms
+      - patch
+      - rule_1.7.6
+
+---
+
+- name: 1.8.1 | PATCH | Ensure GNOME Display Manager is removed
+  block:
+      - name: 1.8.1 | AUDIT | Ensure GNOME Display Manager is removed | check runlevel
+        fail:
+            msg: "System is at runlevel 5 and GDM is installed this can only be removed at Lvl <= 3"
+        when:
+            - ansible_env.SHLVL > 3
+
+      - name: 1.8.1 | AUDIT | Ensure GNOME Display Manager is removed | Remove package
+        package:
+            name: gdm
+            state: absent
+  when:
+      - "'gdm' in ansible_facts.packages"
+      - not rhel7cis_gui
+      - rhel7cis_rule_1_8_1
+  tags:
+      - rule_1.8.1
+      - level1-server
+      - level1-workstation
+
+- name: 1.8.2 | PATCH | Ensure GDM login banner is configured
+  block:
+      - name: 1.8.2 | PATCH | Ensure GDM login banner is configured | gdm profile
+        lineinfile:
+            path: /etc/dconf/profile/gdm
+            regexp: "^{{ item.regexp }}"
+            line: "{{ item.line }}"
+            state: present
+            create: true
+            mode: 0644
+            owner: root
+            group: root
+        with_items:
+            - {regexp: 'user-db', line: 'user-db:user' }
+            - {regexp: 'system-db', line: 'system-db:gdm' }
+            - {regexp: 'file-db', line: 'file-db:/usr/share/gdm/greeter-dconf-defaults' }
+
+      - name: 1.8.2 | PATCH | Ensure GDM login banner is configured | banner
+        lineinfile:
+            path: /etc/dconf/db/gdm.d/01-banner-message
+            regexp: "^{{ item.regexp }}"
+            line: "{{ item.line }}"
+            state: present
+            create: true
+            mode: 0644
+            owner: root
+            group: root
+        with_items:
+            - { regexp: '\[org\/gnome\/login-screen\]', line: '[org/gnome/login-screen]' }
+            - { regexp: 'banner-message-enable', line: 'banner-message-enable=true' }
+            - { regexp: 'banner-message-text', line: "banner-message-text='{{ rhel7cis_warning_banner }}' " }
+  when:
+      - "'gdm' in ansible_facts.packages"
+      - not rhel7cis_gui
+      - rhel7cis_rule_1_8_2
+  tags:
+      - rule_1.8.2
+      - level1-server
+      - level1-workstation
+
+- name: 1.8.3 | PATCH | Ensure last logged in user display is disabled | banner
+  block:
+      - name: 1.8.3 | PATCH | Ensure last logged in user display is disabled | gdm profile
+        lineinfile:
+            path: /etc/dconf/profile/gdm
+            regexp: "^{{ item.regexp }}"
+            line: "{{ item.line }}"
+            state: present
+            create: true
+            mode: 0644
+            owner: root
+            group: root
+        with_items:
+            - {regexp: 'user-db', line: 'user-db:user' }
+            - {regexp: 'system-db', line: 'system-db:gdm' }
+            - {regexp: 'file-db', line: 'file-db:/usr/share/gdm/greeter-dconf-defaults' }
+
+      - name: 1.8.3 | PATCH | Ensure last logged in user display is disabled | login screen
+        lineinfile:
+            path: /etc/dconf/db/gdm.d/00-login-screen
+            regexp: "^{{ item.regexp }}"
+            line: "{{ item.line }}"
+            state: present
+            create: true
+            mode: 0644
+            owner: root
+            group: root
+        with_items:
+            - { regexp: '\[org\/gnome\/login-screen\]', line: '[org/gnome/login-screen]' }
+            - { regexp: 'disable-user-list', line: 'disable-user-list=true' }
+  when:
+      - "'gdm' in ansible_facts.packages"
+      - not rhel7cis_gui
+      - rhel7cis_rule_1_8_3
+  tags:
+      - rule_1.8.3
+      - level1-server
+      - level1-workstation
+
+- name: 1.8.4 | PATCH | Ensure XDCMP is not enabled
+  lineinfile:
+      path: /etc/gdm/custom.conf
+      regexp: ^Enable(\s|)=(\s|)true
+      state: absent
+      create: true
+      owner: root
+      group: root
+      mode: 0644
+  when:
+      - "'gdm' in ansible_facts.packages"
+      - not rhel7cis_gui
+      - rhel7cis_rule_1_8_4
+  tags:
+      - rule_1.8.4
+      - level1-server
+      - level1-workstation
+
+---
+
+- name: "1.9 | PATCH | Ensure updates, patches, and additional security software are installed"
+  package:
+      name: "*"
+      state: latest
+  when:
+      - rhel7cis_rule_1_9
+      - not system_is_ec2
+  tags:
+      - level1-server
+      - level1-workstation
+      - patch
+      - rule_1.9
+      - skip_ansible_lint
+  vars:
+      ansible_python_interpreter: /bin/python
+

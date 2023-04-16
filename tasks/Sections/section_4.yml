@@ -1,0 +1,685 @@
+---
+- name: "4.1.1.1 | PATCH | Ensure auditd is installed"
+  package:
+      name: ['audit', 'audit-libs']
+      state: present
+  vars:
+      ansible_python_interpreter: /bin/python
+  when:
+      - rhel7cis_rule_4_1_1_1
+  notify: restart auditd
+  tags:
+      - level2-server
+      - level2-workstation
+      - auditd
+      - rule_4.1.1.1
+
+- name: "4.1.1.2 | PATCH | Ensure auditd service is enabled and running"
+  service:
+      name: auditd
+      state: started
+      enabled: true
+  when:
+      - not rhel7cis_skip_for_travis
+      - rhel7cis_rule_4_1_1_2
+      - ansible_connection != 'docker'
+  tags:
+      - level2-server
+      - level2-workstation
+      - auditd
+      - patch
+      - rule_4.1.1.2
+
+- name: "4.1.1.3 | PATCH | Ensure auditing for processes that start prior to auditd is enabled"
+  block:
+      - name: "4.1.1.3 | PATCH | Ensure auditing for processes that start prior to auditd is enabled"
+        replace:
+            dest: /etc/default/grub
+            regexp: ^(GRUB_CMDLINE_LINUX=)(?:")(?!.*audit=1)(.+)(?:")$
+            replace: '\1"\2 audit=1"'
+        register: audit_grub
+        notify: grub2cfg
+
+      - name: "4.1.1.3 | PATCH | Ensure auditing for processes that start prior to auditd is enabled"
+        set_fact:
+            change_requires_reboot: true
+        when:
+            - audit_grub.changed
+
+  when:
+      - rhel7cis_rule_4_1_1_3
+  tags:
+      - level2-server
+      - level2-workstation
+      - auditd
+      - patch
+      - rule_4.1.1.3
+
+---
+
+- name: "4.1.2.1 | PATCH | Ensure audit log storage size is configured"
+  lineinfile:
+      dest: /etc/audit/auditd.conf
+      regexp: "^max_log_file( |=)"
+      line: "max_log_file = 10"
+      state: present
+  notify: restart auditd
+  when:
+      - rhel7cis_rule_4_1_2_1
+  tags:
+      - level2-server
+      - level2-workstation
+      - auditd
+      - patch
+      - rule_4.1.2.1
+
+- name: "4.1.2.2 | PATCH | Ensure audit logs are not automatically deleted"
+  lineinfile:
+      dest: /etc/audit/auditd.conf
+      regexp: "^max_log_file_action"
+      line: "max_log_file_action = {{ rhel7cis_auditd['max_log_file_action'] }}"
+      state: present
+  notify: restart auditd
+  when:
+      - rhel7cis_rule_4_1_2_2
+  tags:
+      - level2-server
+      - level2-workstation
+      - auditd
+      - patch
+      - rule_4.1.2.2
+
+- name: "4.1.2.3 | PATCH | Ensure system is disabled when audit logs are full"
+  lineinfile:
+      dest: /etc/audit/auditd.conf
+      regexp: "{{ item.regexp }}"
+      line: "{{ item.line }}"
+      state: present
+  with_items:
+      - { regexp: '^space_left_action', line: "space_left_action = {{ rhel7cis_auditd['space_left_action'] }}" }
+      - { regexp: '^action_mail_acct', line: "action_mail_acct = {{ rhel7cis_auditd['action_mail_acct'] }}" }
+      - { regexp: '^admin_space_left_action', line: "admin_space_left_action = {{ rhel7cis_auditd['admin_space_left_action'] }}" }
+  notify: restart auditd
+  when:
+      - rhel7cis_rule_4_1_2_3
+  tags:
+      - level2-server
+      - level2-workstation
+      - auditd
+      - patch
+      - rule_4.1.2.3
+
+- name: "4.1.2.4 | PATCH | Ensure audit_backlog_limit is sufficient"
+  block:
+      - name: "4.1.2.4 | AUDIT | Ensure audit_backlog_limit is sufficient | Grep GRUB_CMDLINE_LINUX parameter"
+        shell: grep 'GRUB_CMDLINE_LINUX=' /etc/default/grub | cut -f2 -d'"'
+        changed_when: false
+        failed_when: false
+        check_mode: false
+        register: rhel7cis_4_1_2_4_grub_cmdline_linux_settings
+
+      - name: "4.1.2.4 | PATCH | Ensure audit_backlog_limit is sufficient | Set audit_backlog_limit if not configured"
+        lineinfile:
+            dest: /etc/default/grub
+            regexp: '^GRUB_CMDLINE_LINUX='
+            line: 'GRUB_CMDLINE_LINUX="{{ rhel7cis_4_1_2_4_grub_cmdline_linux_settings.stdout }} audit_backlog_limit={{ rhel7cis_audit_backlog_limit }}"'
+        register: grub_backup_new
+        notify: grub2cfg
+        when: '"audit_backlog_limit" not in rhel7cis_4_1_2_4_grub_cmdline_linux_settings.stdout'
+
+      - name: "4.1.2.4 | PATCH | Ensure audit_backlog_limit is sufficient | Adjust audit_backlog_limit if exists"
+        replace:
+            dest: /etc/default/grub
+            regexp: 'audit_backlog_limit=([^\D]+)'
+            replace: 'audit_backlog_limit={{ rhel7cis_audit_backlog_limit }}'
+        register: grub_backup_updated
+        notify: grub2cfg
+        when: '"audit_backlog_limit" in rhel7cis_4_1_2_4_grub_cmdline_linux_settings.stdout'
+
+      - name: "4.1.2.4 | PATCH | Ensure audit_backlog_limit is sufficient"
+        set_fact:
+            change_requires_reboot: true
+        when:
+            - grub_backup_updated.changed or
+              grub_backup_new.changed
+
+  when:
+      - rhel7cis_rule_4_1_2_4
+  tags:
+      - level2-server
+      - level2-workstation
+      - grub
+      - patch
+      - rule_4.1.2.4
+
+- name: "4.1.3 | PATCH | Ensure events that modify date and time information are collected"
+  template:
+      src: audit/time_change.rules.j2
+      dest: /etc/audit/rules.d/time_change.rules
+      owner: root
+      group: root
+      mode: 0600
+  notify: restart auditd
+  when:
+      - rhel7cis_rule_4_1_3
+  tags:
+      - level2-server
+      - level2-workstation
+      - auditd
+      - patch
+      - rule_4.1.3
+
+- name: "4.1.4 | PATCH | Ensure events that modify user/group information are collected"
+  template:
+      src: audit/identity.rules.j2
+      dest: /etc/audit/rules.d/identity.rules
+      owner: root
+      group: root
+      mode: 0600
+  notify: restart auditd
+  when:
+      - rhel7cis_rule_4_1_4
+  tags:
+      - level2-server
+      - level2-workstation
+      - auditd
+      - patch
+      - rule_4.1.4
+
+- name: "4.1.5 | PATCH | Ensure events that modify the system's network environment are collected"
+  template:
+      src: audit/system_local.rules.j2
+      dest: /etc/audit/rules.d/system_local.rules
+      owner: root
+      group: root
+      mode: 0600
+  notify: restart auditd
+  when:
+      - rhel7cis_rule_4_1_5
+  tags:
+      - level2-server
+      - level2-workstation
+      - auditd
+      - patch
+      - rule_4.1.5
+
+- name: "4.1.6 | PATCH | Ensure events that modify the system's Mandatory Access Controls are collected"
+  template:
+      src: audit/MAC_policy.rules.j2
+      dest: /etc/audit/rules.d/MAC_policy.rules
+      owner: root
+      group: root
+      mode: 0600
+  notify: restart auditd
+  when:
+      - rhel7cis_rule_4_1_6
+  tags:
+      - level2-server
+      - level2-workstation
+      - auditd
+      - patch
+      - rule_4.1.6
+
+- name: "4.1.7 | PATCH | Ensure login and logout events are collected"
+  block:
+      - name: "4.1.7 | AUDIT | Ensure login and logout events are collected | Check for pam_fallock or pam_tally2"
+        shell: grep pam_tally2.so /etc/pam.d/system-auth /etc/pam.d/password-auth
+        changed_when: false
+        failed_when: false
+        register: rhel7cis_4_1_7_tally2_check
+        tags:
+            - skip_ansible_lint
+
+      - name: "4.1.7 | PATCH | Ensure login and logout events are collected | Set login and logout events"
+        template:
+            src: audit/logins.rules.j2
+            dest: /etc/audit/rules.d/logins.rules
+            owner: root
+            group: root
+            mode: 0600
+        notify: restart auditd
+  when:
+      - rhel7cis_rule_4_1_7
+  tags:
+      - level2-server
+      - level2-workstation
+      - auditd
+      - patch
+      - rule_4.1.7
+
+- name: "4.1.8 | PATCH | Ensure session initiation information is collected"
+  template:
+      src: audit/session.rules.j2
+      dest: /etc/audit/rules.d/session.rules
+      owner: root
+      group: root
+      mode: 0600
+  notify: restart auditd
+  when:
+      - rhel7cis_rule_4_1_8
+  tags:
+      - level2-server
+      - level2-workstation
+      - auditd
+      - patch
+      - rule_4.1.8
+
+- name: "4.1.9 | PATCH | Ensure discretionary access control permission modification events are collected"
+  template:
+      src: audit/perm_mod.rules.j2
+      dest: /etc/audit/rules.d/perm_mod.rules
+      owner: root
+      group: root
+      mode: 0600
+  notify: restart auditd
+  when:
+      - rhel7cis_rule_4_1_9
+  tags:
+      - level2-server
+      - level2-workstation
+      - auditd
+      - patch
+      - rule_4.1.9
+
+- name: "4.1.10 | PATCH | Ensure unsuccessful unauthorized file access attempts are collected"
+  template:
+      src: audit/access.rules.j2
+      dest: /etc/audit/rules.d/access.rules
+      owner: root
+      group: root
+      mode: 0600
+  notify: restart auditd
+  when:
+      - rhel7cis_rule_4_1_10
+  tags:
+      - level2-server
+      - level2-workstation
+      - auditd
+      - patch
+      - rule_4.1.10
+
+- name: "4.1.11 | PATCH | Ensure use of privileged commands is collected"
+  block:
+      - name: "4.1.11 | AUDIT | Ensure use of privileged commands is collected"
+        shell: for i in  $(df | grep '^/dev' | awk '{ print $NF }'); do find $i -xdev -type f -perm -4000 -o -type f -perm -2000 2>/dev/null; done
+        register: priv_procs
+        changed_when: false
+        check_mode: false
+
+      - name: "4.1.11 | PATCH | Ensure use of privileged commands is collected"
+        template:
+            src: audit/priv_commands.rules.j2
+            dest: /etc/audit/rules.d/priv_commands.rules
+            owner: root
+            group: root
+            mode: 0600
+        notify: restart auditd
+  when:
+      - rhel7cis_rule_4_1_11
+  tags:
+      - level2-server
+      - level2-workstation
+      - auditd
+      - patch
+      - rule_4.1.11
+
+- name: "4.1.12 | PATCH | Ensure successful file system mounts are collected"
+  template:
+      src: audit/mounts.rules.j2
+      dest: /etc/audit/rules.d/mounts.rules
+      owner: root
+      group: root
+      mode: 0600
+  notify: restart auditd
+  when:
+      - rhel7cis_rule_4_1_12
+  tags:
+      - level2-server
+      - level2-workstation
+      - auditd
+      - patch
+      - rule_4.1.12
+
+- name: "4.1.13 | PATCH | Ensure file deletion events by users are collected"
+  template:
+      src: audit/deletion.rules.j2
+      dest: /etc/audit/rules.d/deletion.rules
+      owner: root
+      group: root
+      mode: 0600
+  notify: restart auditd
+  when:
+      - rhel7cis_rule_4_1_13
+  tags:
+      - level2-server
+      - level2-workstation
+      - auditd
+      - patch
+      - rule_4.1.13
+
+- name: "4.1.14 | PATCH | Ensure changes to system administration scope (sudoers) is collected"
+  template:
+      src: audit/scope.rules.j2
+      dest: /etc/audit/rules.d/scope.rules
+      owner: root
+      group: root
+      mode: 0600
+  notify: restart auditd
+  when:
+      - rhel7cis_rule_4_1_14
+  tags:
+      - level2-server
+      - level2-workstation
+      - auditd
+      - patch
+      - rule_4.1.14
+
+- name: "4.1.15 | PATCH | Ensure system administrator command executions (sudo) are collected"
+  template:
+      src: audit/actions.rules.j2
+      dest: /etc/audit/rules.d/actions.rules
+      owner: root
+      group: root
+      mode: 0600
+  notify: restart auditd
+  when:
+      - rhel7cis_rule_4_1_15
+  tags:
+      - level2-server
+      - level2-workstation
+      - auditd
+      - patch
+      - rule_4.1.15
+
+- name: "4.1.16 | PATCH | Ensure kernel module loading and unloading is collected"
+  template:
+      src: audit/modules.rules.j2
+      dest: /etc/audit/rules.d/modules.rules
+      owner: root
+      group: root
+      mode: 0600
+  notify: restart auditd
+  when:
+      - rhel7cis_rule_4_1_16
+  tags:
+      - level2-server
+      - level2-workstation
+      - auditd
+      - patch
+      - rule_4.1.16
+
+- name: "4.1.17 | PATCH | Ensure the audit configuration is immutable"
+  template:
+      src: audit/99_finalize.rules.j2
+      dest: /etc/audit/rules.d/99_finalize.rules
+      owner: root
+      group: root
+      mode: 0600
+  notify: restart auditd
+  when:
+      - rhel7cis_rule_4_1_17
+  tags:
+      - level2-server
+      - level2-workstation
+      - auditd
+      - patch
+      - rule_4.1.17
+
+---
+
+- name: "4.2.1.1 | PATCH | Ensure rsyslog is installed"
+  package:
+      name: "{{ rhel7cis_syslog }}"
+      state: present
+  vars:
+      ansible_python_interpreter: /bin/python
+  when:
+      - rhel7cis_rule_4_2_1_1
+  tags:
+      - level1-server
+      - level1-workstation
+      - patch
+      - rule_4.2.1.1
+
+- name: "4.2.1.2 | PATCH | Ensure rsyslog Service is enabled and running"
+  service:
+      name: rsyslog
+      enabled: true
+      state: started
+  when:
+      - rhel7cis_rule_4_2_1_2
+      - rhel7cis_syslog == 'rsyslog'
+  tags:
+      - level1-server
+      - level1-workstation
+      - patch
+      - rsyslog
+      - rule_4.2.1.2
+
+- name: "4.2.1.3 | PATCH | Ensure rsyslog default file permissions configured"
+  lineinfile:
+      dest: /etc/rsyslog.conf
+      regexp: '^\$FileCreateMode'
+      line: '$FileCreateMode 0640'
+  notify: restart rsyslog
+  when:
+      - rhel7cis_rule_4_2_1_3
+  tags:
+      - level1-server
+      - level1-workstation
+      - patch
+      - rule_4.2.1.3
+
+- name: "4.2.1.4 | PATCH | Ensure logging is configured"
+  block:
+      - name: "4.2.1.4 | AUDIT | Ensure logging is configured | rsyslog current config message out"
+        shell: cat /etc/rsyslog.conf
+        changed_when: false
+        failed_when: false
+        register: rhel_07_4_2_1_4_audit
+
+      - name: "4.2.1.4 | PATCH | Ensure logging is configured | Debug out rsyslog settings"
+        debug:
+            msg:
+                - "These are the current logging configurations for rsyslog, please review:"
+                - "{{ rhel_07_4_2_1_4_audit.stdout_lines }}"
+        when:
+            - not rhel7cis_rsyslog_ansiblemanaged
+
+      - name: "4.2.1.4 | PATCH | Ensure logging is configured | Set logging settings lineinfile"
+        lineinfile:
+            path: /etc/rsyslog.conf
+            state: present
+            regexp: "{{ item.regexp }}"
+            line: "{{ item.line }}"
+            insertafter: '^[# ]*{{ item.insertafter }}\s*=\s*'
+        with_items:
+            - { regexp: '^\*\.emerg(.*)$', line: '*.emerg                                                 :omusrmsg:*', insertafter: '# Everybody gets emergency messages' }
+            - { regexp: '^authpriv(.*)$', line: 'auth,authpriv.*                                              /var/log/secure', insertafter: '# # The authpriv file has restricted access.' }
+            - { regexp: '^mail\.\*(.*)$', line: 'mail.*                                                  -/var/log/mail', insertafter: '# Log all the mail messages in one place.' }
+            - { regexp: '^mail.info(.*)$', line: 'mail.info                                               -/var/log/mail.info', insertafter: '# Log all the mail messages in one place.' }
+            - { regexp: '^mail.warning(.*)$', line: 'mail.warning                                            -/var/log/mail.warning', insertafter: '# Log all the mail messages in one place.' }
+            - { regexp: '^mail.err(.*)$', line: 'mail.err                                                /var/log/mail.err', insertafter: '# Log all the mail messages in one place.' }
+            - { regexp: '^news.crit(.*)$', line: 'news.crit                                               -/var/log/news/news.crit', insertafter: '# Save news errors of level crit and higher in a special file.' }
+            - { regexp: '^news.err(.*)$', line: 'news.err                                             -/var/log/news/news.err', insertafter: '# Save news errors of level crit and higher in a special file.' }
+            - { regexp: '^news.notice(.*)$', line: 'news.notice                                             -/var/log/news/news.notice', insertafter: '# Save news errors of level crit and higher in a special file.' }
+        loop_control:
+            label: "{{ item.regexp }}"
+        notify: restart rsyslog
+        when:
+            - rhel7cis_rsyslog_ansiblemanaged
+
+      - name: "4.2.1.4 | PATCH | Ensure logging is configured | Misc. log setting"
+        blockinfile:
+            path: /etc/rsyslog.conf
+            state: present
+            marker: "# {mark} MISC. LOG SETTINGS (ANSIBLE MANAGED)"
+            block: |
+              # misc. logging additions to meet CIS standards
+              *.=warning;*.=err                                        -/var/log/warn
+              *.crit                                                   /var/log/warn
+              *.*;mail.none;news.none                                  /var/log/messages
+            insertafter: '#### RULES ####'
+        notify: restart rsyslog
+        when:
+            - rhel7cis_rsyslog_ansiblemanaged
+
+      - name: "4.2.1.4 | PATCH | Ensure logging is configured | Local log settings"
+        blockinfile:
+            path: /etc/rsyslog.conf
+            state: present
+            marker: "#{mark} LOCAL LOG SETTINGS (ANSIBLE MANAGED)"
+            block: |
+              # local log settings
+              local0,local1.*                                          -/var/log/localmessages
+              local2,local3.*                                          -/var/log/localmessages
+              local4,local5.*                                          -/var/log/localmessages
+              local6,local7.*                                          -/var/log/localmessages
+            insertafter: '#### RULES ####'
+        notify: restart rsyslog
+  when:
+      - rhel7cis_rule_4_2_1_4
+  tags:
+      - level1-server
+      - level1-workstation
+      - patch
+      - rsyslog
+      - rule_4.2.1.4
+
+- name: "4.2.1.5 | PATCH | Ensure rsyslog is configured to send logs to a remote log host"
+  blockinfile:
+      path: /etc/rsyslog.conf
+      state: present
+      block: |
+        # remote host is: name/ip:port, e.g. 192.168.0.1:514, port optional
+        *.* @@{{ rhel7cis_remote_log_server }}
+      insertafter: EOF
+  notify: restart rsyslog
+  register: result
+  failed_when:
+      - result is failed
+      - result.rc != 257
+  when:
+      - rhel7cis_rule_4_2_1_5
+      - rhel7cis_remote_log_server is defined
+  tags:
+      - level1-server
+      - level1-workstation
+      - patch
+      - rule_4.2.1.5
+      - rsyslog
+
+- name: "4.2.1.6 | PATCH | Ensure remote rsyslog messages are only accepted on designated log hosts."
+  block:
+      - name: "4.2.1.6 | PATCH | Ensure remote rsyslog messages are only accepted on designated log hosts. | When not log host"
+        replace:
+            path: /etc/rsyslog.conf
+            regexp: '({{ item }})'
+            replace: '#\1'
+        with_items:
+            - '^(\$ModLoad imtcp)'
+            - '^(\$InputTCPServerRun)'
+        notify: restart rsyslog
+        when:
+            - not rhel7cis_system_is_log_server
+
+      - name: "4.2.1.6 | PATCH | Ensure remote rsyslog messages are only accepted on designated log hosts. | When log host"
+        replace:
+            path: /etc/rsyslog.conf
+            regexp: '^#(.*{{ item }}.*)'
+            replace: '\1'
+        with_items:
+            - 'ModLoad imtcp'
+            - 'InputTCPServerRun'
+        notify: restart rsyslog
+        when:
+            - rhel7cis_system_is_log_server
+  when:
+      - rhel7cis_rule_4_2_1_6
+  tags:
+      - level1-server
+      - level1-workstation
+      - patch
+      - rule_4.2.1.6
+      - rsyslog
+
+---
+
+- name: "4.2.2.1 | PATCH | Ensure journald is configured to send logs to rsyslog"
+  lineinfile:
+      path: /etc/systemd/journald.conf
+      regexp: '^[F|f]orward[T|t]o[S|s]yslog='
+      line: "ForwardToSyslog=yes"
+  when:
+      - rhel7cis_rule_4_2_2_1
+  tags:
+      - level1-server
+      - level1-workstation
+      - patch
+      - rule_4.2.2.1
+      - journald
+
+- name: "4.2.2.2 | PATCH | Ensure journald is configured to compress large log files"
+  lineinfile:
+      path: /etc/systemd/journald.conf
+      regexp: '^[C|c]ompress='
+      line: "Compress=yes"
+  when:
+      - rhel7cis_rule_4_2_2_2
+  tags:
+      - level1-server
+      - level1-workstation
+      - patch
+      - rule_4.2.2.2
+      - journald
+
+- name: "4.2.2.3 | PATCH | Ensure journald is configured to write logfiles to persistent disk"
+  lineinfile:
+      path: /etc/systemd/journald.conf
+      regexp: '^[S|s]torage='
+      line: "Storage=persistent"
+  when:
+      - rhel7cis_rule_4_2_2_3
+  tags:
+      - level1-server
+      - level1-workstation
+      - patch
+      - rule_4.2.2.3
+      - journald
+
+---
+
+- name: "4.2.3 | PATCH | Ensure permissions on all logfiles are configured"
+  command: find /var/log -type f -exec chmod g-wx,o-rwx "{}" +
+  changed_when: false
+  failed_when: false
+  when:
+      - rhel7cis_rule_4_2_3
+  tags:
+      - level1-server
+      - level1-workstation
+      - patch
+      - rule_4.2.3
+
+- name: "4.2.4 | AUDIT | Ensure logrotate is configured"
+  block:
+      - name: "4.2.4 | AUDIT | Ensure logrotate is configured"
+        find:
+            paths: /etc/logrotate.d/
+        register: log_rotate
+
+      - name: "4.2.4 | AUDIT | Ensure logrotate is configured | output list"
+        debug:
+            msg:
+                - WARNING!! The following files need to confirm with site requirements
+                - /etc/logrotate.conf
+                - "{{ log_rotate.files | map(attribute='path') | list }}"
+        when: log_rotate.matched > 0
+  when:
+      - rhel7cis_rule_4_2_4
+  tags:
+      - level1-server
+      - level1-workstation
+      - audit
+      - rule_4.2.4
+

@@ -1,0 +1,1219 @@
+---
+
+- name: "3.1.1 | PATCH | Disable IPv6 | grub"
+  block:
+      - name: "3.1.1 | PATCH | Disable IPv6 | grub"
+        replace:
+            dest: /etc/default/grub
+            regexp: '(^GRUB_CMDLINE_LINUX\s*\=\s*)(?:")(.+)(?<!ipv6.disable=1)(?:")'
+            replace: '\1"\2 ipv6.disable=1"'
+        register: grub_ipv6
+        notify: grub2cfg
+
+      - name: "3.1.1 | FACT | Disable IPv6 | grub"
+        set_fact:
+            change_requires_reboot: true
+        when: grub_ipv6.changed
+  when:
+      - not rhel7cis_ipv6_required
+      - rhel7cis_rule_3_1_1
+  tags:
+      - level2-server
+      - level2-workstation
+      - rule_3.1.1
+      - patch
+
+- name: "3.1.2| Ensure wireless interfaces are disabled"
+  block:
+      - name: "3.1.2 | PATCH | Ensure wireless interfaces are disabled | Check if wifi is enabled"
+        shell: nmcli radio wifi
+        register: rhel_07_wifi_enabled
+        check_mode: false
+        changed_when: rhel_07_wifi_enabled.stdout != "disabled"
+
+      - name: "3.1.2 | PATCH | Ensure wireless interfaces are disabled | Disable wifi if enabled"
+        command: nmcli radio wifi off
+        when: rhel_07_wifi_enabled is changed
+
+  when:
+      - rhel7cis_rule_3_1_2
+      - "'NetworkManager' in ansible_facts.packages"
+  tags:
+      - level1-server
+      - level2-workstation
+      - rule_3.1.2
+
+---
+- name: "3.2.1 | PATCH | Ensure IP forwarding is disabled | IPv4"
+  block:
+      - name: "3.2.1 | PATCH | Ensure IP forwarding is disabled | IPv4"
+        sysctl:
+            name: net.ipv4.ip_forward
+            value: '0'
+            state: present
+            reload: true
+            ignoreerrors: true
+        notify:
+            - sysctl flush ipv4 route table
+
+      - name: "3.2.1 | PATCH | Ensure IP forwarding is disabled IPv6"
+        sysctl:
+            name: net.ipv6.conf.all.forwarding
+            value: '0'
+            state: present
+            reload: true
+            ignoreerrors: true
+        notify:
+            - sysctl flush ipv6 route table
+        when:
+            - rhel7cis_ipv6_required
+  when:
+      - not rhel7cis_is_router
+      - rhel7cis_rule_3_2_1
+  tags:
+      - level1-server
+      - level1-workstation
+      - sysctl
+      - patch
+      - rule_3.2.1
+
+- name: "3.2.2 | PATCH | Ensure packet redirect sending is disabled"
+  sysctl:
+      name: '{{ item.name }}'
+      value: '{{ item.value }}'
+      sysctl_set: true
+      state: present
+      reload: true
+      ignoreerrors: true
+  with_items:
+      - { name: net.ipv4.conf.all.send_redirects, value: 0 }
+      - { name: net.ipv4.conf.default.send_redirects, value: 0 }
+  notify:
+      - sysctl flush ipv4 route table
+  when:
+      - not rhel7cis_is_router
+      - rhel7cis_rule_3_2_2
+  tags:
+      - level1-server
+      - level1-workstation
+      - sysctl
+      - patch
+      - rule_3.2.2
+
+---
+- name: "3.3.1 | PATCH | Ensure source routed packets are not accepted"
+  block:
+      - name: "3.3.1 | PATCH | Ensure source routed packets are not accepted | IPv4"
+        sysctl:
+            name: '{{ item.name }}'
+            value: '{{ item.value }}'
+            sysctl_set: true
+            state: present
+            reload: true
+            ignoreerrors: true
+        with_items:
+            - { name: net.ipv4.conf.all.accept_source_route, value: 0 }
+            - { name: net.ipv4.conf.default.accept_source_route, value: 0 }
+        notify:
+            - sysctl flush ipv4 route table
+
+      - name: "3.3.1 | PATCH | Ensure source routed packets are not accepted | IPv6"
+        sysctl:
+            name: '{{ item.name }}'
+            value: '{{ item.value }}'
+            sysctl_set: true
+            state: present
+            reload: true
+            ignoreerrors: true
+        with_items:
+            - { name: net.ipv6.conf.all.accept_source_route, value: 0 }
+            - { name: net.ipv6.conf.default.accept_source_route, value: 0 }
+        notify:
+            - sysctl flush ipv6 route table
+        when:
+            - rhel7cis_ipv6_required
+  when:
+      - rhel7cis_rule_3_3_1
+  tags:
+      - level1-server
+      - level1-workstation
+      - sysctl
+      - patch
+      - rule_3.3.1
+
+- name: "3.3.2 | PATCH | Ensure ICMP redirects are not accepted"
+  block:
+      - name: "3.3.2 | PATCH | Ensure ICMP redirects are not accepted | IPv4"
+        sysctl:
+            name: '{{ item.name }}'
+            value: '{{ item.value }}'
+            sysctl_set: true
+            state: present
+            reload: true
+            ignoreerrors: true
+        with_items:
+            - { name: net.ipv4.conf.all.accept_redirects, value: 0 }
+            - { name: net.ipv4.conf.default.accept_redirects, value: 0 }
+        notify:
+            - sysctl flush ipv4 route table
+
+      - name: "3.3.2 | PATCH | Ensure ICMP redirects are not accepted | IPv6"
+        sysctl:
+            name: '{{ item.name }}'
+            value: '{{ item.value }}'
+            sysctl_set: true
+            state: present
+            reload: true
+            ignoreerrors: true
+        with_items:
+            - { name: net.ipv6.conf.all.accept_redirects, value: 0 }
+            - { name: net.ipv6.conf.default.accept_redirects, value: 0 }
+        notify:
+            - sysctl flush ipv6 route table
+        when:
+            - rhel7cis_ipv6_required
+  when:
+      - rhel7cis_rule_3_3_2
+  tags:
+      - level1-server
+      - level1-workstation
+      - sysctl
+      - patch
+      - rule_3.3.2
+
+- name: "3.3.3 | PATCH | Ensure secure ICMP redirects are not accepted"
+  sysctl:
+      name: '{{ item.name }}'
+      value: '{{ item.value }}'
+      sysctl_set: true
+      state: present
+      reload: true
+      ignoreerrors: true
+  with_items:
+      - { name: net.ipv4.conf.all.secure_redirects, value: 0 }
+      - { name: net.ipv4.conf.default.secure_redirects, value: 0 }
+  notify:
+      - sysctl flush ipv4 route table
+  when:
+      - rhel7cis_rule_3_3_3
+  tags:
+      - level1-server
+      - level1-workstation
+      - sysctl
+      - patch
+      - rule_3.3.3
+
+- name: "3.3.4 | PATCH | Ensure suspicious packets are logged"
+  sysctl:
+      name: '{{ item.name }}'
+      value: '{{ item.value }}'
+      sysctl_set: true
+      state: present
+      reload: true
+      ignoreerrors: true
+  with_items:
+      - { name: net.ipv4.conf.all.log_martians, value: 1 }
+      - { name: net.ipv4.conf.default.log_martians, value: 1 }
+  notify:
+      - sysctl flush ipv4 route table
+  when:
+      - rhel7cis_rule_3_3_4
+  tags:
+      - level1-server
+      - level1-workstation
+      - sysctl
+      - patch
+      - rule_3.3.4
+
+- name: "3.3.5 | PATCH | Ensure broadcast ICMP requests are ignored"
+  sysctl:
+      name: net.ipv4.icmp_echo_ignore_broadcasts
+      value: '1'
+      state: present
+      reload: true
+      ignoreerrors: true
+  notify:
+      - sysctl flush ipv4 route table
+  when:
+      - rhel7cis_rule_3_3_5
+  tags:
+      - level1-server
+      - level1-workstation
+      - sysctl
+      - patch
+      - rule_3.3.5
+
+- name: "3.3.6 | PATCH | Ensure bogus ICMP responses are ignored"
+  sysctl:
+      name: net.ipv4.icmp_ignore_bogus_error_responses
+      value: '1'
+      state: present
+      reload: true
+      ignoreerrors: true
+  notify:
+      - sysctl flush ipv4 route table
+  when:
+      - rhel7cis_rule_3_3_6
+  tags:
+      - level1-server
+      - level1-workstation
+      - sysctl
+      - patch
+      - rule_3.3.6
+
+- name: "3.3.7 | PATCH | Ensure Reverse Path Filtering is enabled"
+  sysctl:
+      name: '{{ item.name }}'
+      value: '{{ item.value }}'
+      sysctl_set: true
+      state: present
+      reload: true
+      ignoreerrors: true
+  with_items:
+      - { name: net.ipv4.conf.all.rp_filter, value: 1 }
+      - { name: net.ipv4.conf.default.rp_filter, value: 1 }
+  notify:
+      - sysctl flush ipv4 route table
+  when:
+      - rhel7cis_rule_3_3_7
+  tags:
+      - level1-server
+      - level1-workstation
+      - sysctl
+      - patch
+      - rule_3.3.7
+
+- name: "3.3.8 | PATCH | Ensure TCP SYN Cookies is enabled"
+  sysctl:
+      name: net.ipv4.tcp_syncookies
+      value: '1'
+      state: present
+      reload: true
+      ignoreerrors: true
+  notify:
+      - sysctl flush ipv4 route table
+  when:
+      - rhel7cis_rule_3_3_8
+  tags:
+      - level1-server
+      - level1-workstation
+      - sysctl
+      - patch
+      - rule_3.3.8
+
+- name: "3.3.9 |  PATCH | Ensure IPv6 router advertisements are not accepted"
+  sysctl:
+      name: '{{ item.name }}'
+      value: '{{ item.value }}'
+      sysctl_set: true
+      state: present
+      reload: true
+      ignoreerrors: true
+  with_items:
+      - { name: net.ipv6.conf.all.accept_ra, value: 0 }
+      - { name: net.ipv6.conf.default.accept_ra, value: 0 }
+  notify:
+      - sysctl flush ipv6 route table
+  when:
+      - rhel7cis_ipv6_required
+      - rhel7cis_rule_3_3_9
+  tags:
+      - level1-server
+      - level1-workstation
+      - sysctl
+      - patch
+      - rule_3.3.9
+
+---
+
+- name: "3.4.1 | PATCH | Ensure DCCP is disabled"
+  lineinfile:
+      dest: /etc/modprobe.d/CIS.conf
+      regexp: "^(#)?install dccp(\\s|$)"
+      line: "install dccp /bin/true"
+      create: true
+      owner: root
+      group: root
+      mode: 0600
+  when:
+      - rhel7cis_rule_3_4_1
+  tags:
+      - level2-server
+      - level2-workstation
+      - patch
+      - rule_3.4.1
+
+- name: "3.4.2 | PATCH | Ensure SCTP is disabled"
+  lineinfile:
+      dest: /etc/modprobe.d/CIS.conf
+      regexp: "^(#)?install sctp(\\s|$)"
+      line: "install sctp /bin/true"
+      create: true
+      owner: root
+      group: root
+      mode: 0600
+  when:
+      - rhel7cis_rule_3_4_2
+  tags:
+      - level2-server
+      - level2-workstation
+      - patch
+      - rule_3.4.2
+
+---
+
+- name: "3.5.1.1 | PATCH | Ensure FirewallD is installed"
+  package:
+      name: firewalld
+      state: present
+  vars:
+      ansible_python_interpreter: /bin/python
+  when:
+      - "'firewalld' not in ansible_facts.packages"
+      - rhel7cis_rule_3_5_1_1
+  tags:
+      - level1-server
+      - level1-workstation
+      - patch
+      - rule_3.5.1.1
+
+- name: "3.5.1.2 | PATCH | Ensure iptables-services not installed with firewalld"
+  package:
+      name: iptables-services
+      state: absent
+  vars:
+      ansible_python_interpreter: /bin/python
+  when:
+      - "'iptables-services' in ansible_facts.packages"
+      - rhel7cis_rule_3_5_1_2
+  tags:
+      - level1-server
+      - level1-workstation
+      - patch
+      - rule_3.5.1.2
+
+- name: "3.5.1.3 | PATCH | Ensure iptables-services not installed with firewalld"
+  package:
+      name: nftables
+      state: absent
+  vars:
+      ansible_python_interpreter: /bin/python
+  when:
+      - "'nftables' in ansible_facts.packages"
+      - rhel7cis_rule_3_5_1_3
+  tags:
+      - level1-server
+      - level1-workstation
+      - patch
+      - rule_3.5.1.3
+
+- name: "3.5.1.4 | PATCH | Ensure firewalld service is enabled and running"
+  systemd:
+      name: firewalld
+      state: started
+      enabled: true
+      masked: false
+  when:
+      - rhel7cis_rule_3_5_1_4
+  tags:
+      - level1-server
+      - level1-workstation
+      - patch
+      - rule_3.5.1.4
+
+- name: "3.5.1.5 | PATCH | Ensure firewalld default zone is set"
+  block:
+      - name: "3.5.1.5 | AUDIT | Ensure default zone is set"
+        command: firewall-cmd --get-default-zone
+        changed_when: false
+        check_mode: false
+        register: current_default_zone
+
+      - name: "3.5.1.5 | PATCH | Ensure default zone is set"
+        command: firewall-cmd --set-default-zone="{{ rhel7cis_default_zone }}"
+        when:
+            - current_default_zone.stdout != rhel7cis_default_zone
+  when:
+      - rhel7cis_rule_3_5_1_5
+  tags:
+      - level1-server
+      - level1-workstation
+      - patch
+      - rule_3.5.1.5
+
+- name: "3.5.1.6 | AUDIT | Ensure network interfaces are assigned to appropriate zone"
+  block:
+      - name: "3.5.1.6 | AUDIT | Ensure network interfaces are assigned to appropriate zone | Get list of interfaces and policies"
+        shell: "nmcli -t connection show | awk -F: '{ if($4){print $4} }' | while read INT; do firewall-cmd --get-active-zones | grep -B1 $INT; done"
+        changed_when: false
+        check_mode: false
+        register: rhel7cis_3_5_1_6_interfacepolicy
+
+      - name: "3.5.1.6 | AUDIT | Ensure network interfaces are assigned to appropriate zone | Get list of interfaces and policies | Show the interface to policy"
+        debug:
+            msg:
+                - "The items below are the policies tied to the interfaces, please correct as needed"
+                - "{{ rhel7cis_3_5_1_6_interfacepolicy.stdout_lines }}"
+  when:
+      - rhel7cis_rule_3_5_1_6
+  tags:
+      - level1-server
+      - level1-workstation
+      - audit
+      - rule_3.5.1.6
+
+- name: "3.5.1.7 | AUDIT | Ensure firewalld drops unnecessary services and ports"
+  block:
+      - name: "3.5.1.7 | AUDIT | Ensure firewalld drops unnecessary services and ports | Get list of services and ports"
+        shell: "firewall-cmd --get-active-zones | awk '!/:/ {print $1}' | while read ZN; do firewall-cmd --list-all --zone=$ZN; done"
+        changed_when: false
+        check_mode: false
+        register: rhel7cis_3_5_1_7_servicesport
+
+      - name: "3.5.1.7 | AUDIT | Ensure firewalld drops unnecessary services and ports | Show services and ports"
+        debug:
+            msg:
+                - "The items below are the services and ports that are accepted, please correct as needed"
+                - "{{ rhel7cis_3_5_1_7_servicesport.stdout_lines }}"
+  when:
+      - rhel7cis_rule_3_5_1_7
+  tags:
+      - level1-server
+      - level1-workstation
+      - audit
+      - rule_3.5.1.7
+
+---
+
+- name: "3.5.2.1 | PATCH | Ensure nftables is installed"
+  package:
+      name: nftables
+      state: present
+  vars:
+      ansible_python_interpreter: /bin/python
+  when:
+      - "'nftables' not in ansible_facts.packages"
+      - rhel7cis_rule_3_5_2_1
+  tags:
+      - level1-server
+      - level1-workstation
+      - patch
+      - rule_3.5.2.1
+
+- name: "3.5.2.2 | PATCH | Ensure firewalld is either not installed or masked with nftables"
+  package:
+      name: firewalld
+      state: absent
+  vars:
+      ansible_python_interpreter: /bin/python
+  when:
+      - "'firewalld' in ansible_facts.packages"
+      - rhel7cis_rule_3_5_2_2
+  tags:
+      - level1-server
+      - level1-workstation
+      - patch
+      - rule_3.5.2.2
+
+- name: "3.5.2.3 | PATCH | Ensure iptables-services not installed with nftables"
+  package:
+      name: iptables-services
+      state: absent
+  vars:
+      ansible_python_interpreter: /bin/python
+  when:
+      - "'iptables-services' in ansible_facts.packages"
+      - rhel7cis_rule_3_5_2_3
+  tags:
+      - level1-server
+      - level1-workstation
+      - patch
+      - rule_3.5.2.3
+
+- name: "3.5.2.4 | PATCH | Ensure iptables are flushed with nftables"
+  block:
+      - name: "3.5.2.4 | PATCH | Ensure iptables are flushed with nftables| Flush IPv4 tables"
+        command: iptables -F
+
+      - name: "3.5.2.4 | PATCH | Ensure iptables are flushed with nftables | Flush IPv6 tables"
+        command: ip6tables -F
+        when:
+            - rhel7cis_ipv6_required
+  when:
+      - rhel7cis_firewall != "iptables"
+      - rhel7cis_rule_3_5_2_4
+  tags:
+      - level1-server
+      - level1-workstation
+      - patch
+      - rule_3.5.2.4
+
+- name: "3.5.2.5 | PATCH | Ensure an nftables table exists"
+  block:
+      - name: "3.5.2.5 | AUDIT | Ensure an nftables table exists | Check for tables"
+        command: nft list tables
+        register: rhel7cis_3_5_2_5_nft_tables
+
+      - name: "3.5.2.5 | AUDIT | Ensure an nftables table exists | Show existing tables"
+        debug:
+            msg:
+                - "Below are the current nft tables, please review"
+                - "{{ rhel7cis_3_5_2_5_nft_tables.stdout_lines }}"
+        when:
+            - rhel7cis_3_5_2_5_nft_tables.stdout | length > 0
+
+      - name: "3.5.2.5 | AUDIT | Ensure an nftables table exists | Alert on no tables"
+        debug:
+            msg:
+                - "WARNING!! You currently have no nft tables, please review your setup"
+                - 'Use the command "nft create table inet <table name>" to create a new table'
+        when:
+            - rhel7cis_3_5_2_5_nft_tables.stdout | length == 0
+            - not rhel7cis_nft_tables_autoNewTable
+
+      - name: "3.5.2.5 | PATCH | Ensure an nftables table exists | Create table if needed"
+        command: nft create table inet "{{ rhel7cis_nft_tables_tableName }}"
+        failed_when: false
+        when:
+            - rhel7cis_nft_tables_autoNewTable
+  when:
+      - rhel7cis_rule_3_5_2_5
+  tags:
+      - level1-server
+      - level1-workstation
+      - patch
+      - rule_3.5.2.5
+
+- name: "3.5.2.6 | PATCH | Ensure nftables base chains exist"
+  block:
+      - name: "3.5.2.6 | AUDIT | Ensure nftables base chains exist | Get current chains for INPUT"
+        shell: nft list ruleset | grep 'hook input'
+        register: rhel7cis_3_5_2_6_input_chains
+
+      - name: "3.5.2.6 | AUDIT | Ensure nftables base chains exist | Get current chains for FORWARD"
+        shell: nft list ruleset | grep 'hook forward'
+        register: rhel7cis_3_5_2_6_forward_chains
+
+      - name: "3.5.2.6 | AUDIT | Ensure nftables base chains exist | Get current chains for OUTPUT"
+        shell: nft list ruleset | grep 'hook output'
+        register: rhel7cis_3_5_2_6_output_chains
+
+      - name: "3.5.2.6 | AUDIT | Ensure nftables base chains exist | Display chains for review"
+        debug:
+            msg:
+                - "Below are the current INPUT chains"
+                - "{{ rhel7cis_3_5_2_6_input_chains.stdout_lines }}"
+                - "Below are the current FORWARD chains"
+                - "{{ rhel7cis_3_5_2_6_forward_chains.stdout_lines }}"
+                - "Below are teh current OUTPUT chains"
+                - "{{ rhel7cis_3_4_2_6_output_chains.stdout_lines }}"
+        when:
+            - not rhel7cis_nft_tables_autoChainCreate
+
+      - name: "3.5.2.6 | PATCH | Ensure nftables base chains exist | Create chains if needed"
+        command: "{{ item }}"
+        failed_when: false
+        with_items:
+            - nft create chain inet "{{ rhel7cis_nft_tables_tableName }}" input { type filter hook input priority 0 \; }
+            - nft create chain inet "{{ rhel7cis_nft_tables_tableName }}" forward { type filter hook forward priority 0 \; }
+            - nft create chain inet "{{ rhel7cis_nft_tables_tableName }}" output { type filter hook output priority 0 \; }
+        when:
+            - rhel7cis_nft_tables_autoChainCreate
+  when:
+      - rhel7cis_rule_3_5_2_6
+  tags:
+      - skip_ansible_lint
+      - level1-server
+      - level1-workstation
+      - patch
+      - rule_3.5.2.6
+
+- name: "3.5.2.7 | PATCH | Ensure nftables loopback traffic is configured"
+  block:
+      - name: "3.5.2.7 | AUDIT | Ensure nftables loopback traffic is configured | Gather iif lo accept existence"
+        shell: nft list ruleset | awk '/hook input/,/}/' | grep 'iif "lo" accept'
+        changed_when: false
+        failed_when: false
+        register: rhel7cis_3_5_2_7_iiflo
+
+      - name: "3.5.2.7 | AUDIT | Ensure nftables loopback traffic is configured | Gather ip saddr existence"
+        shell: nft list ruleset | awk '/hook input/,/}/' | grep 'ip saddr'
+        changed_when: false
+        failed_when: false
+        register: rhel7cis_3_5_2_7_ipsaddr
+
+      - name: "3.5.2.7 | AUDIT | Ensure nftables loopback traffic is configured | Gather ip6 saddr existence"
+        shell: nft list ruleset | awk '/hook input/,/}/' | grep 'ip6 saddr'
+        changed_when: false
+        failed_when: false
+        register: rhel7cis_3_5_2_7_ip6saddr
+
+      - name: "3.5.2.7 | PATCH | Ensure nftables loopback traffic is configured | Set iif lo accept rule"
+        command: nft add rule inet "{{ rhel7cis_nft_tables_tableName }}" input iif lo accept
+        when:
+            - '"iif \"lo\" accept" not in rhel7cis_3_5_2_7_iiflo.stdout'
+
+      - name: "3.5.2.7 | PATCH | Ensure nftables loopback traffic is configured | Set ip sddr rule"
+        command: nft add rule inet "{{ rhel7cis_nft_tables_tableName }}" input ip saddr 127.0.0.0/8 counter drop
+        when:
+            - '"ip saddr 127.0.0.0/8 counter packets 0 bytes 0 drop" not in rhel7cis_3_5_2_7_ipsaddr.stdout'
+
+      - name: "3.5.2.7 | PATCH | Ensure nftables loopback traffic is configured | Set ip6 saddr rule"
+        command: nft add rule inet "{{ rhel7cis_nft_tables_tableName }}" input ip6 saddr ::1 counter drop
+        when:
+            - '"ip6 saddr ::1 counter packets 0 bytes 0 drop" not in rhel7cis_3_5_2_7_ip6saddr.stdout'
+  when:
+      - rhel7cis_rule_3.5.2.7
+  tags:
+      - level1-server
+      - level1-workstation
+      - patch
+      - rule_3.5.2.7
+
+- name: "3.5.2.8 | PATCH | Ensure nftables outbound and established connections are configured"
+  block:
+      - name: "3.5.2.8 | AUDIT | Ensure nftables outbound and established connections are configured | Gather incoming connection rules"
+        shell: nft list ruleset | awk '/hook input/,/}/' | grep -E 'ip protocol (tcp|udp|icmp) ct state'
+        changed_when: false
+        failed_when: false
+        register: rhel7cis_3_5_2_8_inconnectionrule
+
+      - name: "3.5.2.8 | AUDIT | Ensure nftables outbound and established connections are configured | Gather outbound connection rules"
+        shell: nft list ruleset | awk '/hook output/,/}/' | grep -E 'ip protocol (tcp|udp|icmp) ct state'
+        changed_when: false
+        failed_when: false
+        register: rhel7cis_3_5_2_8_outconnectionrule
+
+      - name: "3.5.2.8 | PATCH | Ensure nftables outbound and established connections are configured | Add input tcp established accpet policy"
+        command: nft add rule inet "{{ rhel7cis_nft_tables_tableName }}" input ip protocol tcp ct state established accept
+        become: true
+        when:
+            - '"ip protocol tcp ct state established accept" not in rhel7cis_3_5_2_8_inconnectionrule.stdout'
+
+      - name: "3.5.2.8 | PATCH | Ensure nftables outbound and established connections are configured | Add input udp established accpet policy"
+        command: nft add rule inet "{{ rhel7cis_nft_tables_tableName }}" input ip protocol udp ct state established accept
+        become: true
+        when:
+            - '"ip protocol udp ct state established accept" not in rhel7cis_3_5_2_8_inconnectionrule.stdout'
+
+      - name: "3.5.2.8 | PATCH | Ensure nftables outbound and established connections are configured | Add input icmp established accpet policy"
+        command: nft add rule inet "{{ rhel7cis_nft_tables_tableName }}" input ip protocol icmp ct state established accept
+        become: true
+        when:
+            - '"ip protocol icmp ct state established accept" not in rhel7cis_3_5_2_8_inconnectionrule.stdout'
+
+      - name: "3.5.2.8 | PATCH | Ensure nftables outbound and established connections are configured | Add output tcp new, related, established accpet policy"
+        command: nft add rule inet "{{ rhel7cis_nft_tables_tableName }}" output ip protocol tcp ct state new,related,established accept
+        become: true
+        when:
+            - '"ip protocol tcp ct state established,related,new accept" not in rhel7cis_3_5_2_8_outconnectionrule.stdout'
+
+      - name: "3.5.2.8 | PATCH | Ensure nftables outbound and established connections are configured | Add output udp new, related, established accpet policy"
+        command: nft add rule inet "{{ rhel7cis_nft_tables_tableName }}" output ip protocol udp ct state new,related,established accept
+        become: true
+        when:
+            - '"ip protocol udp ct state established,related,new accept" not in rhel7cis_3_5_2_8_outconnectionrule.stdout'
+
+      - name: "3.5.2.8 | PATCH | Ensure nftables outbound and established connections are configured | Add output icmp new, related, established accpet policy"
+        command: nft add rule inet "{{ rhel7cis_nft_tables_tableName }}" output ip protocol icmp ct state new,related,established accept
+        become: true
+        when:
+            - '"ip protocol icmp ct state established,related,new accept" not in rhel7cis_3_5_2_8_outconnectionrule.stdout'
+  when:
+      - rhel7cis_rule_3_5_2_8
+  tags:
+      - level1-server
+      - level1-workstation
+      - patch
+      - rule_3.5.2.8
+
+- name: "3.5.2.9 | PATCH | Ensure nftables default deny firewall policy"
+  block:
+      - name: "3.5.2.9 | AUDIT | Ensure nftables default deny firewall policy | Check for hook input deny policy"
+        shell: nft list table inet "{{ rhel7cis_nft_tables_tableName }}" | grep 'hook input'
+        become: true
+        failed_when: false
+        changed_when: false
+        register: rhel7cis_3_5_2_9_inputpolicy
+
+      - name: "3.5.2.9 | AUDIT | Ensure nftables default deny firewall policy | Check for hook forward deny policy"
+        shell: nft list table inet "{{ rhel7cis_nft_tables_tableName }}" | grep 'hook forward'
+        become: true
+        failed_when: false
+        changed_when: false
+        register: rhel7cis_3_5_2_9_forwardpolicy
+
+      - name: "3.5.2.9 | AUDIT | Ensure nftables default deny firewall policy | Check for hook output deny policy"
+        shell: nft list table inet "{{ rhel7cis_nft_tables_tableName }}" | grep 'hook output'
+        become: true
+        failed_when: false
+        changed_when: false
+        register: rhel7cis_3_5_2_9_outputpolicy
+
+      - name: "3.5.2.9 | AUDIT | Ensure nftables default deny firewall policy | Check for SSH allow"
+        shell: nft list table inet "{{ rhel7cis_nft_tables_tableName }}" | grep 'ssh'
+        become: true
+        failed_when: false
+        changed_when: false
+        register: rhel7cis_3_5_2_9_sshallowcheck
+
+      - name: "3.5.2.9 | PATCH | Ensure nftables default deny firewall policy | Enable SSH traffic"
+        command: nft add rule inet "{{ rhel7cis_nft_tables_tableName }}" input tcp dport ssh accept
+        become: true
+        when:
+            - '"tcp dport ssh accept" not in rhel7cis_3_5_2_9_sshallowcheck.stdout'
+
+      - name: "3.5.2.9 | PATCH | Ensure nftables default deny firewall policy | Set hook input deny policy"
+        command: nft chain inet "{{ rhel7cis_nft_tables_tableName }}" input { policy drop \; }
+        become: true
+        when:
+            - '"type filter hook input priority 0; policy drop;" not in rhel7cis_3_5_2_9_inputpolicy.stdout'
+
+      - name: "3.5.2.9 | PATCH | EEnsure nftables default deny firewall policy | Create hook forward deny policy"
+        command: nft chain inet "{{ rhel7cis_nft_tables_tableName }}" forward { policy drop \; }
+        become: true
+        when:
+            - '"type filter hook forward priority 0; policy drop;" not in rhel7cis_3_5_2_9_forwardpolicy.stdout'
+
+      - name: "3.5.2.9 | PATCH | Ensure nftables default deny firewall policy | Create hook output deny policy"
+        command: nft chain inet "{{ rhel7cis_nft_tables_tableName }}" output { policy drop \; }
+        become: true
+        when:
+            - '"type filter hook output priority 0; policy drop;" not in rhel7cis_3_5_2_9_outputpolicy.stdout'
+  when:
+      - rhel7cis_rule_3_5_2_9
+  tags:
+      - level1-server
+      - level1-workstation
+      - patch
+      - rule_3.5.2.9
+
+- name: "3.5.2.10 | PATCH | Ensure nftables service is enabled"
+  systemd:
+      name: nftables
+      enabled: true
+  become: true
+  when:
+      - rhel7cis_rule_3_5_2_10
+  tags:
+      - level1-server
+      - level1-workstation
+      - patch
+      - rule_3.5.2.10
+
+- name: "3.5.2.11 | PATCH | Ensure nftables rules are permanent"
+  lineinfile:
+      path: /etc/sysconfig/nftables.conf
+      state: present
+      insertafter: EOF
+      line: include "/etc/nftables/inet-{{ rhel7cis_nft_tables_tableName }}"
+  become: true
+  when:
+      - rhel7cis_rule_3_5_2_11
+  tags:
+      - level1-server
+      - level1-workstation
+      - patch
+      - rule_3.5.2.11
+
+---
+
+- name: "3.5.3.1.1 | PATCH | Ensure iptables packages are installed"
+  package:
+      name: "{{ item }}"
+      state: present
+  loop:
+      - iptables
+      - iptables-services
+  vars:
+      ansible_python_interpreter: /bin/python
+  when:
+      - "'iptables' not in ansible_facts.packages or
+        'iptables-services' not in ansible_facts.packages"
+      - rhel7cis_rule_3_5_3_1_1
+  tags:
+      - level1-server
+      - level1-workstation
+      - patch
+      - rule_3.5.3.1.1
+
+- name: "3.5.3.1.2 | PATCH | Ensure nftables is not installed with iptables"
+  package:
+      name: nftables
+      state: absent
+  vars:
+      ansible_python_interpreter: /bin/python
+  when:
+      - "'nftables' in ansible_facts.packages"
+      - rhel7cis_rule_3_5_3_1_2
+  tags:
+      - level1-server
+      - level1-workstation
+      - patch
+      - rule_3.5.3.1.2
+
+- name: "3.5.3.1.3 | PATCH | Ensure firewalld is either not installed or masked with iptables"
+  package:
+      name: firewalld
+      state: absent
+  vars:
+      ansible_python_interpreter: /bin/python
+  when:
+      - "'firewalld' in ansible_facts.packages"
+      - rhel7cis_rule_3_5_3_1_3
+  tags:
+      - level1-server
+      - level1-workstation
+      - patch
+      - rule_3.5.3.1.3
+
+---
+
+- name: "3.5.3.2.1 | PATCH | Ensure iptables loopback traffic is configured"
+  block:
+      - name: "3.5.3.2.1 | PATCH | Ensure iptables loopback traffic is configured | INPUT loopback ACCEPT"
+        iptables:
+            action: append
+            chain: INPUT
+            in_interface: lo
+            jump: ACCEPT
+
+      - name: "3.5.3.2.1 | PATCH | Ensure iptables loopback traffic is configured | OUTPUT loopback ACCEPT"
+        iptables:
+            action: append
+            chain: OUTPUT
+            out_interface: lo
+            jump: ACCEPT
+
+      - name: "3.5.3.2.1 | PATCH | Ensure iptables loopback traffic is configured | OUTPUT loopback ACCEPT"
+        iptables:
+            action: append
+            chain: INPUT
+            source: 127.0.0.0/8
+            jump: DROP
+  when:
+      - rhel7cis_rule_3_5_3_2_1
+  tags:
+      - level1-server
+      - level1-workstation
+      - patch
+      - rule_3.5.3.2.1
+      - iptables
+
+- name: "3.5.3.2.2 | PATCH | Ensure iptables outbound and established connections are configured"
+  iptables:
+      action: append
+      chain: '{{ item.chain }}'
+      protocol: '{{ item.protocol }}'
+      match: state
+      ctstate: '{{ item.ctstate }}'
+      jump: ACCEPT
+  with_items:
+      - { chain: OUTPUT, protocol: tcp, ctstate: 'NEW,ESTABLISHED' }
+      - { chain: OUTPUT, protocol: udp, ctstate: 'NEW,ESTABLISHED' }
+      - { chain: OUTPUT, protocol: icmp, ctstate: 'NEW,ESTABLISHED' }
+      - { chain: INPUT, protocol: tcp, ctstate: 'ESTABLISHED' }
+      - { chain: INPUT, protocol: udp, ctstate: 'ESTABLISHED' }
+      - { chain: INPUT, protocol: icmp, ctstate: 'ESTABLISHED' }
+  when:
+      - rhel7cis_rule_3_5_3_2_2
+  tags:
+      - level1-server
+      - level1-workstation
+      - patch
+      - rule_3.5.3.2.2
+      - iptables
+
+- name: "3.5.3.2.3 | AUDIT | Ensure iptables firewall rules exist for all open ports"
+  block:
+      - name: "3.5.3.2.3 | AUDIT | Ensure iptables firewall rules exist for all open ports | Get list of open ports"
+        command: ss -4tuln
+        changed_when: false
+        failed_when: false
+        check_mode: false
+        register: rhel7cis_3_5_3_2_3_open_ports
+
+      - name: "3.5.3.2.3 | AUDIT | Ensure iptables firewall rules exist for all open ports | Get list of rules"
+        command: iptables -L INPUT -v -n
+        changed_when: false
+        failed_when: false
+        check_mode: false
+        register: rhel7cis_3_5_3_2_3_current_rules
+
+      - name: "3.5.3.2.3 | AUDIT | Ensure iptables firewall rules exist for all open ports | Alert about settings"
+        debug:
+            msg:
+                - "ALERT!!!!Below is the list the open ports and current rules"
+                - "Please create a rule for any open port that does not have a current rule"
+                - "Open Ports:"
+                - "{{ rhel7cis_3_5_3_2_3_open_ports.stdout_lines }}"
+                - "Current Rules:"
+                - "{{ rhel7cis_3_5_3_2_3_current_rules.stdout_lines }}"
+  when:
+      - rhel7cis_rule_3_5_3_2_3
+  tags:
+      - level1-server
+      - level1-workstation
+      - audit
+      - rule_3.5.3.2.3
+      - iptables
+
+- name: "3.5.3.2.4 | PATCH | Ensure iptables default deny firewall policy"
+  block:
+      - name: "3.5.3.2.4 | PATCH | Ensure iptables default deny firewall policy | Configure SSH to be allowed in"
+        iptables:
+            chain: INPUT
+            protocol: tcp
+            destination_port: 22
+            jump: ACCEPT
+            ctstate: 'NEW,ESTABLISHED'
+
+      - name: "3.5.3.2.4 | PATCH | Ensure iptables default deny firewall policy | Configure SSH to be allowed out"
+        iptables:
+            chain: OUTPUT
+            protocol: tcp
+            source_port: 22
+            jump: ACCEPT
+            ctstate: 'NEW,ESTABLISHED'
+
+      - name: "3.5.3.2.4 | PATCH | Ensure iptables default deny firewall policy | Enable apt traffic"
+        iptables:
+            chain: INPUT
+            ctstate: 'ESTABLISHED'
+            jump: ACCEPT
+
+      - name: "3.5.3.2.4 | PATCH | Ensure iptables default deny firewall policy | Set drop items"
+        iptables:
+            policy: DROP
+            chain: "{{ item }}"
+        with_items:
+            - INPUT
+            - FORWARD
+            - OUTPUT
+  when:
+      - rhel7cis_rule_3_5_3_2_4
+      - not system_is_ec2
+  tags:
+      - level1-server
+      - level1-workstation
+      - patch
+      - rule_3.5.3.2.4
+      - iptables
+
+- name: "3.5.3.2.5 | Ensure iptables rules are saved "
+  block:
+      - name: "3.5.3.2.5 | Ensure iptables rules are saved "
+        shell: service iptables save
+        changed_when: rhel7cis_iptables_save.rc == 0
+        failed_when: rhel7cis_iptables_save.rc != 0
+        register: rhel7cis_iptables_save
+  when:
+      - rhel7cis_save_iptables_cis_rules
+      - rhel7cis_rule_3_5_3_2_1 or
+        rhel7cis_rule_3_5_3_2_2 or
+        rhel7cis_rule_3_5_3_2_3 or
+        rhel7cis_rule_3_5_3_2_4 or
+        rhel7cis_rule_3_5_3_2_5
+  tags:
+      - level1-server
+      - level1-workstation
+      - patch
+      - rule_3.5.3.2.5
+      - iptables
+
+- name: "3.5.3.2.6 | Ensure iptables is enabled and running"
+  service:
+      name: iptables
+      state: started
+      enabled: true
+  when:
+      - rhel7cis_rule_3_5_3_2_6
+  tags:
+      - level1-server
+      - level1-workstation
+      - patch
+      - rule_3.5.3.2.6
+      - iptables
+
+---
+
+- name: "3.5.3.3.1 | PATCH | Ensure ip6tables loopback traffic is configured"
+  block:
+      - name: "3.5.3.3.1 | PATCH | Ensure ip6tables loopback traffic is configured | INPUT loopback ACCEPT"
+        iptables:
+            action: append
+            chain: INPUT
+            in_interface: lo
+            jump: ACCEPT
+            ip_version: ipv6
+
+      - name: "3.5.3.3.1 | PATCH | Ensure ip6tables loopback traffic is configured | OUTPUT loopback ACCEPT"
+        iptables:
+            action: append
+            chain: OUTPUT
+            out_interface: lo
+            jump: ACCEPT
+            ip_version: ipv6
+
+      - name: "3.5.3.3.1 | PATCH | Ensure ip6tables loopback traffic is configured | OUTPUT loopback ACCEPT"
+        iptables:
+            action: append
+            chain: INPUT
+            source: ::1
+            jump: DROP
+            ip_version: ipv6
+  when:
+      - rhel7cis_rule_3_5_3_3_1
+  tags:
+      - level1-server
+      - level1-workstation
+      - patch
+      - rule_3.5.3.3.1
+      - iptables
+      - ip6tables
+
+- name: "3.5.3.3.2 | PATCH | Ensure ip6tables outbound and established connections are configured"
+  iptables:
+      action: append
+      chain: '{{ item.chain }}'
+      protocol: '{{ item.protocol }}'
+      match: state
+      ctstate: '{{ item.ctstate }}'
+      jump: ACCEPT
+      ip_version: ipv6
+  with_items:
+      - { chain: OUTPUT, protocol: tcp, ctstate: 'NEW,ESTABLISHED' }
+      - { chain: OUTPUT, protocol: udp, ctstate: 'NEW,ESTABLISHED' }
+      - { chain: OUTPUT, protocol: icmp, ctstate: 'NEW,ESTABLISHED' }
+      - { chain: INPUT, protocol: tcp, ctstate: 'ESTABLISHED' }
+      - { chain: INPUT, protocol: udp, ctstate: 'ESTABLISHED' }
+      - { chain: INPUT, protocol: icmp, ctstate: 'ESTABLISHED' }
+  when:
+      - rhel7cis_rule_3_5_3_3_2
+  tags:
+      - level1-server
+      - level1-workstation
+      - patch
+      - rule_3.5.3.3.2
+      - iptables
+      - ip6tables
+
+- name: "3.5.3.3.3 | AUDIT | Ensure ip6tables firewall rules exist for all open ports"
+  block:
+      - name: "3.5.3.3.3 | AUDIT | Ensure ip6tables firewall rules exist for all open ports | Get list of open ports"
+        command: ss -6tuln
+        changed_when: false
+        failed_when: false
+        check_mode: false
+        register: rhel7cis_3_5_3_3_3_open_ports
+
+      - name: "3.5.3.3.3 | AUDIT | Ensure ip6tables firewall rules exist for all open ports | Get list of rules"
+        command: ip6tables -L INPUT -v -n
+        changed_when: false
+        failed_when: false
+        check_mode: false
+        register: rhel7cis_3_5_3_3_3_current_rules
+
+      - name: "3.5.3.3.3 | AUDIT | Ensure ip6tables firewall rules exist for all open ports | Alert about settings"
+        debug:
+            msg:
+                - "ALERT!!!!Below is the list the open ports and current rules"
+                - "Please create a rule for any open port that does not have a current rule"
+                - "Open Ports:"
+                - "{{ rhel7cis_3_5_3_3_3_open_ports.stdout_lines }}"
+                - "Current Rules:"
+                - "{{ rhel7cis_3_5_3_3_3_current_rules.stdout_lines }}"
+  when:
+      - rhel7cis_rule_3_5_3_3_3
+  tags:
+      - level1-server
+      - level1-workstation
+      - audit
+      - rule_3.5.3.3.3
+      - iptables
+      - ip6tables
+
+- name: "3.5.3.3.4 | PATCH | Ensure ip6tables default deny firewall policy"
+  block:
+      - name: "3.5.3.3.4 | PATCH | Ensure ip6tables default deny firewall policy | Configure SSH to be allowed in"
+        iptables:
+            chain: INPUT
+            protocol: tcp
+            destination_port: 22
+            jump: ACCEPT
+            ctstate: 'NEW,ESTABLISHED'
+            ip_version: ipv6
+
+      - name: "3.5.3.3.4 | PATCH | Ensure ip6tables default deny firewall policy | Configure SSH to be allowed out"
+        iptables:
+            chain: OUTPUT
+            protocol: tcp
+            source_port: 22
+            jump: ACCEPT
+            ctstate: 'NEW,ESTABLISHED'
+            ip_version: ipv6
+
+      - name: "3.5.3.3.4 | PATCH | Ensure ip6tables default deny firewall policy | Enable apt traffic"
+        iptables:
+            chain: INPUT
+            ctstate: 'ESTABLISHED'
+            jump: ACCEPT
+            ip_version: ipv6
+
+      - name: "3.5.3.3.4 | PATCH | Ensure ip6tables default deny firewall policy | Set drop items"
+        iptables:
+            policy: DROP
+            chain: "{{ item }}"
+            ip_version: ipv6
+        with_items:
+            - INPUT
+            - FORWARD
+            - OUTPUT
+  when:
+      - rhel7cis_rule_3_5_3_3_4
+      - not system_is_ec2
+  tags:
+      - level1-server
+      - level1-workstation
+      - patch
+      - rule_3.5.3.3.4
+      - iptables
+      - ip6tables
+
+- name: "3.5.3.3.5 | Ensure ip6tables rules are saved "
+  block:
+      - name: "3.5.3.3.5 | Ensure ip6tables rules are saved "
+        shell: service ip6tables save
+        changed_when: rhel7cis_ip6tables_save.rc == 0
+        failed_when: rhel7cis_ip6tables_save.rc != 0
+        register: rhel7cis_ip6tables_save
+  when:
+      - rhel7cis_save_ip6tables_cis_rules
+      - rhel7cis_rule_3_5_3_3_1 or
+        rhel7cis_rule_3_5_3_3_2 or
+        rhel7cis_rule_3_5_3_3_3 or
+        rhel7cis_rule_3_5_3_3_4 or
+        rhel7cis_rule_3_5_3_3_5
+  tags:
+      - level1-server
+      - level1-workstation
+      - patch
+      - rule_3.5.3.3.5
+      - iptables
+      - ip6tables
+
+- name: "3.5.3.3.6 | Ensure ip6tables is enabled and running"
+  service:
+      name: ip6tables
+      state: started
+      enabled: true
+  when:
+      - rhel7cis_rule_3_5_3_3_6
+  tags:
+      - level1-server
+      - level1-workstation
+      - patch
+      - rule_3.5.3.3.6
+      - iptables
+      - ip6tables
+
